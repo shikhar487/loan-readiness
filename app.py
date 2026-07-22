@@ -576,3 +576,67 @@ if go:
     st.caption("This is an indicative readiness estimate based on the information you provided. "
                "The more complete your answers, the more precise it is — an incomplete form "
                "tends to read as higher risk.")
+
+    # ==================================================================
+    # 8 · Personalised improvement plan (the essence) + PDF report
+    # ==================================================================
+    from improvement_engine import analyse
+    from report_pdf import build_report_pdf
+    plan_res = analyse(ans, router)
+
+    section("8", "How to improve your loan readiness")
+    st.markdown(
+        "Ranked by how much each change lifts your **Readiness Score** — and every impact is "
+        "**causally corrected**, so we only push changes that genuinely move the needle "
+        "(not ones the raw model overstates). We only suggest things you can actually change.")
+
+    if plan_res["plan"]:
+        pg1, pg2 = st.columns([0.5, 0.5])
+        pg1.markdown(f'<div class="tile"><div class="k">Readiness now</div>'
+                     f'<div class="v">{plan_res["readiness_now"]}/100</div>'
+                     f'<div class="s">approval likelihood {plan_res["approval_now_pct"]:.0f}%</div></div>',
+                     unsafe_allow_html=True)
+        pg2.markdown(f'<div class="tile"><div class="k">If you act on the top 3</div>'
+                     f'<div class="v" style="color:var(--good);">{plan_res["readiness_after_top3"]}/100</div>'
+                     f'<div class="s">+{plan_res["readiness_after_top3"]-plan_res["readiness_now"]} points · '
+                     f'{len(plan_res["products_now"])} → {len(plan_res["products_after"])} products unlock</div></div>',
+                     unsafe_allow_html=True)
+        st.write("")
+        _cc = {"High": "var(--good)", "Medium": "var(--warning)",
+               "Low": "var(--critical)", "Model-implied": "var(--ink-muted)"}
+        for i, p in enumerate(plan_res["plan"], 1):
+            st.markdown(
+                f'<div style="border:1px solid var(--hair);border-radius:11px;padding:12px 16px;'
+                f'margin-bottom:8px;background:var(--surface);">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+                f'<span style="font-weight:640;color:var(--ink);">{i}. {p["title"]}</span>'
+                f'<span style="font-weight:680;color:var(--good);font-size:1.05rem;">+{p["readiness_gain_pts"]} pts</span>'
+                f'</div>'
+                f'<div style="color:var(--ink-2);font-size:.85rem;margin-top:3px;">{p["detail"]} '
+                f'· {p["effort"]}, {p["timeframe"]} '
+                f'· <span style="color:{_cc.get(p["confidence"],"var(--ink-muted)")};">● {p["confidence"]} confidence</span></div>'
+                f'</div>', unsafe_allow_html=True)
+
+        with st.expander("🔬 The causal reality-check — why our advice is different"):
+            st.markdown(
+                "Most credit tools show what *correlates* with approval. We use **double/debiased "
+                "machine learning** to estimate what each change *causally* does, so we never "
+                "oversell a lever the raw model overstates.")
+            import pandas as _pd
+            tbl = _pd.DataFrame([{
+                "Change": p["title"],
+                "Raw model says": f"−{p['raw_risk_drop_pp']:.1f}pp risk",
+                "Causally-corrected": ("not causally tested" if p["confidence"] == "Model-implied"
+                                       else f"−{p['causal_risk_drop_pp']:.1f}pp risk"),
+                "Confidence": p["confidence"],
+            } for p in plan_res["plan"]])
+            st.dataframe(tbl, hide_index=True, use_container_width=True)
+    else:
+        st.info("From the details you provided, we didn't find high-impact changes to suggest. "
+                "Answering more of the optional questions may reveal opportunities.")
+
+    pdf_bytes = build_report_pdf(ans, plan_res, applicant_name="Applicant",
+                                 product_label=allp[product])
+    st.download_button("📄 Download my full improvement report (PDF)", data=pdf_bytes,
+                       file_name="loan_readiness_report.pdf", mime="application/pdf",
+                       type="primary", use_container_width=True)

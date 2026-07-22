@@ -1,0 +1,163 @@
+{
+  "unsecured": {
+    "dti": {
+      "lever": "Reduce DTI by 10 points",
+      "delta": -10.0,
+      "naive_pp": -2.21,
+      "causal_pp": -1.61,
+      "ci90_pp": [
+        -2.27,
+        -0.95
+      ],
+      "sccf": 0.727,
+      "confounded_pct": 27.3,
+      "sign_flip": false
+    },
+    "revol_util": {
+      "lever": "Cut card utilisation (80->30%)",
+      "delta": -50.0,
+      "naive_pp": -7.12,
+      "causal_pp": -7.88,
+      "ci90_pp": [
+        -8.41,
+        -7.34
+      ],
+      "sccf": 1.106,
+      "confounded_pct": 0.0,
+      "sign_flip": false
+    },
+    "fico_score": {
+      "lever": "Raise credit score by 50",
+      "delta": 50.0,
+      "naive_pp": -8.96,
+      "causal_pp": -8.46,
+      "ci90_pp": [
+        -8.81,
+        -8.12
+      ],
+      "sccf": 0.944,
+      "confounded_pct": 5.6,
+      "sign_flip": false
+    },
+    "il_util": {
+      "lever": "Cut instalment-loan utilisation",
+      "delta": -30.0,
+      "naive_pp": -2.6,
+      "causal_pp": -2.11,
+      "ci90_pp": [
+        -2.46,
+        -1.75
+      ],
+      "sccf": 0.809,
+      "confounded_pct": 19.1,
+      "sign_flip": false
+    },
+    "inq_last_6mths": {
+      "lever": "Two fewer recent enquiries",
+      "delta": -2.0,
+      "naive_pp": -7.96,
+      "causal_pp": -7.96,
+      "ci90_pp": [
+        -8.65,
+        -7.27
+      ],
+      "sccf": 1.0,
+      "confounded_pct": 0.0,
+      "sign_flip": false
+    },
+    "mortgage_bal_to_income": {
+      "lever": "Lower mortgage-to-income",
+      "delta": -0.5,
+      "naive_pp": 0.92,
+      "causal_pp": 0.61,
+      "ci90_pp": [
+        0.46,
+        0.75
+      ],
+      "sccf": 0.659,
+      "confounded_pct": 34.1,
+      "sign_flip": false
+    }
+  },
+  "secured": {
+    "LTV": {
+      "lever": "Lower loan-to-value (bigger down payment)",
+      "delta": -0.1,
+      "naive_pp": -0.95,
+      "causal_pp": -0.75,
+      "ci90_pp": [
+        -1.07,
+        -0.44
+      ],
+      "sccf": 0.791,
+      "confounded_pct": 20.9,
+      "sign_flip": false
+    },
+    "ANNUITY_INCOME_RATIO": {
+      "lever": "Reduce EMI-to-income",
+      "delta": -0.05,
+      "naive_pp": -0.18,
+      "causal_pp": -0.27,
+      "ci90_pp": [
+        -0.5,
+        -0.04
+      ],
+      "sccf": 1.487,
+      "confounded_pct": 0.0,
+      "sign_flip": false
+    },
+    "CREDIT_INCOME_RATIO": {
+      "lever": "Borrow less vs income",
+      "delta": -0.5,
+      "naive_pp": 0.03,
+      "causal_pp": 0.33,
+      "ci90_pp": [
+        -0.16,
+        0.82
+      ],
+      "sccf": 1.5,
+      "confounded_pct": 0.0,
+      "sign_flip": false
+    },
+    "EXT_SOURCE_2": {
+      "lever": "Improve external score",
+      "delta": 0.1,
+      "naive_pp": -1.81,
+      "causal_pp": -1.73,
+      "ci90_pp": [
+        -1.89,
+        -1.57
+      ],
+      "sccf": 0.954,
+      "confounded_pct": 4.6,
+      "sign_flip": false
+    },
+    "AMT_REQ_CREDIT_BUREAU_YEAR": {
+      "lever": "Fewer bureau enquiries",
+      "delta": -2.0,
+      "naive_pp": -1.09,
+      "causal_pp": -0.9,
+      "ci90_pp": [
+        -1.27,
+        -0.52
+      ],
+      "sccf": 0.821,
+      "confounded_pct": 17.9,
+      "sign_flip": false
+    },
+    "sec_debt_to_income": {
+      "lever": "Lower secured debt-to-income",
+      "delta": -0.2,
+      "naive_pp": 0.0,
+      "causal_pp": 0.0,
+      "ci90_pp": [
+        -0.0,
+        0.0
+      ],
+      "sccf": 1.385,
+      "confounded_pct": 0.0,
+      "sign_flip": false
+    }
+  },
+  "note": "SCCF = |causal DML effect| / |naive correlational effect|. delta is the realistic improving change. Lower SCCF = more confounded = the raw model overstates this lever."
+}
