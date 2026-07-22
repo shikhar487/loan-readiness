@@ -417,9 +417,8 @@ def derive(ans: Answers, today: Optional[date] = None) -> DerivedProfile:
     # --- notes for the UI ---------------------------------------------------
     if tier == 0:
         prof.notes.append(
-            "No credit score provided - using the no-score model. External scores "
-            "cannot be reliably estimated from other details (R^2 0.05-0.14), so "
-            "this estimate has a deliberately wider confidence band."
+            "No credit score provided - your estimate is based on your other answers, "
+            "with a slightly wider margin for uncertainty."
         )
     if dti is None and (ans.monthly_income is None or ans.monthly_emi_existing is None):
         prof.notes.append(

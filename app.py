@@ -181,22 +181,22 @@ def tri_yesno(label, key, help=None):
 # 1 · Product
 # ======================================================================
 section("1", "What are you applying for?",
-        "Your product type decides which model assesses you. We use one model — never a blend of two.")
+        "Your loan type tailors the questions we ask and how your readiness is assessed.")
 allp = {**UNSECURED_PRODUCTS, **SECURED_PRODUCTS}
 product = st.selectbox("Loan type", list(allp), format_func=lambda k: allp[k],
                        label_visibility="collapsed")
 track = "unsecured" if product in UNSECURED_PRODUCTS else "secured"
 
-c1, c2, c3 = st.columns(3)
-c1.markdown(f'<div class="tile"><div class="k">Track</div><div class="v">{track.title()}</div>'
-            f'<div class="s">{allp[product]}</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div class="tile"><div class="k">Dataset</div><div class="v">'
-            f'{"LendingClub" if track=="unsecured" else "Home Credit"}</div>'
-            f'<div class="s">{"Unsecured personal loans" if track=="unsecured" else "Asset-backed (proxy)"}</div></div>',
-            unsafe_allow_html=True)
-c3.markdown(f'<div class="tile"><div class="k">Model accuracy</div>'
-            f'<div class="v">{registry[(track,1)].oof_auc:.3f}</div>'
-            f'<div class="s">Validation AUC</div></div>', unsafe_allow_html=True)
+# Small track indicator only — the dataset and model accuracy are intentionally
+# NOT shown to the end user (we don't reveal which model runs behind the scenes).
+st.markdown(
+    f'<div style="display:inline-flex;align-items:center;gap:9px;background:var(--surface);'
+    f'border:1px solid var(--hair);border-radius:10px;padding:7px 14px;margin-top:2px;">'
+    f'<span style="color:var(--ink-muted);font-size:.68rem;text-transform:uppercase;'
+    f'letter-spacing:.06em;font-weight:600;">Track</span>'
+    f'<span style="color:var(--ink);font-weight:650;font-size:.9rem;">{track.title()}</span>'
+    f'<span style="color:var(--ink-2);font-size:.8rem;">· {allp[product]}</span>'
+    f'</div>', unsafe_allow_html=True)
 
 # ======================================================================
 # 2 · Core financials — always known, so asked directly
@@ -539,9 +539,8 @@ if go:
   <div class="band" style="color:{col};"><span>{icon}</span><span>{band}</span></div>
   <div class="track"><div class="fill" style="width:{pct:.1f}%;background:{col};"></div></div>
   <div class="scale"><span>0%</span><span>30%</span><span>60%+</span></div>
-  <div class="cap">Assessed by <b>{res['model_used']}</b> (validation AUC
-    {res['model_oof_auc']:.3f}) because you chose a <b>{res['track']}</b> product
-    {"and provided a credit score." if res['tier'] >= 1 else "without a credit score."}</div>
+  <div class="cap">Based on the details you provided for a <b>{res['track']}</b> loan
+    {"." if res['tier'] >= 1 else ", assessed without a credit score."}</div>
 </div>""", unsafe_allow_html=True)
     with r2:
         t1, t2 = st.columns(2)
@@ -549,48 +548,31 @@ if go:
                     f'<div class="v">{res["precision"]}</div>'
                     f'<div class="s">based on how much you could tell us</div></div>',
                     unsafe_allow_html=True)
-        t2.markdown(f'<div class="tile"><div class="k">Inputs used</div>'
+        t2.markdown(f'<div class="tile"><div class="k">Details provided</div>'
                     f'<div class="v">{res["inputs_supplied"]}</div>'
-                    f'<div class="s">model features supplied</div></div>', unsafe_allow_html=True)
+                    f'<div class="s">questions answered</div></div>', unsafe_allow_html=True)
         st.write("")
         t3, t4 = st.columns(2)
-        t3.markdown(f'<div class="tile"><div class="k">Model</div>'
-                    f'<div class="v" style="font-size:1.05rem">{res["model_used"]}</div>'
-                    f'<div class="s">one model, no blending</div></div>', unsafe_allow_html=True)
-        t4.markdown(f'<div class="tile"><div class="k">Score tier</div>'
-                    f'<div class="v">Tier {res["tier"]}</div>'
-                    f'<div class="s">{"score provided" if res["tier"]>=1 else "no score"}</div></div>',
-                    unsafe_allow_html=True)
+        t3.markdown(f'<div class="tile"><div class="k">Risk band</div>'
+                    f'<div class="v" style="font-size:1.15rem;color:{col};">{icon} {band}</div>'
+                    f'<div class="s">where you sit today</div></div>', unsafe_allow_html=True)
+        _loan = f"₹{loan_amount:,.0f}" if loan_amount else "—"
+        t4.markdown(f'<div class="tile"><div class="k">Loan requested</div>'
+                    f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
+                    f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
 
     for note in res["notes"]:
         st.info(note, icon="ℹ️")
 
     if res["tier"] == 0 and track == "secured":
-        st.error("**Precision warning** — for secured loans, having no credit score costs a lot "
-                 "of accuracy (AUC 0.739 → 0.663). Obtaining your score and re-running this "
-                 "will give a materially better assessment.", icon="⚠️")
+        st.error("**Precision note** — for a secured loan, not having a credit score reduces "
+                 "how precise this estimate can be. Getting your score and re-running will give "
+                 "a more reliable assessment.", icon="⚠️")
     elif res["tier"] == 0:
-        st.success("You didn't provide a credit score — for **unsecured** loans that barely "
-                   "matters (AUC 0.715 → 0.713). Your other answers already carry most of "
-                   "what a score would tell us.", icon="✅")
+        st.success("You didn't provide a credit score — for a personal loan that barely changes "
+                   "the result, because your other answers already carry most of the signal.",
+                   icon="✅")
 
-    if track == "secured":
-        st.warning("**Model caveat** — our secured model is trained on asset-backed *consumer* "
-                   "finance, not a mortgage book. Loan-to-value and asset value therefore have "
-                   "little influence on this figure. Treat collateral-based conclusions as out "
-                   "of scope.", icon="⚠️")
-
-    with st.expander("What we could not use"):
-        miss = res["model_inputs_missing"]
-        if miss:
-            st.write("Left blank because you said you don't have it or aren't sure:")
-            st.write(", ".join(f"`{m}`" for m in miss))
-        else:
-            st.success("You supplied every input this model uses.")
-        st.caption("⚠️ Honest limitation: the model learned from lending records where a blank "
-                   "field usually meant a thin credit file. It cannot distinguish that from "
-                   "*you simply not knowing*, so an incomplete form tends to score worse. "
-                   "Treat low-confidence results as indicative only.")
-
-    with st.expander("Values we derived for you"):
-        st.json({k: v for k, v in res["features"].items() if v is not None})
+    st.caption("This is an indicative readiness estimate based on the information you provided. "
+               "The more complete your answers, the more precise it is — an incomplete form "
+               "tends to read as higher risk.")
