@@ -161,10 +161,15 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
              Paragraph("Readiness gain", WHITEB), Paragraph("Effort", WHITEB),
              Paragraph("Confidence", WHITEB)]]
     for i, p in enumerate(res["plan"], 1):
+        _cell = (f"<b>{p['title']}</b><br/><font size=8 color='#52514e'>{p['detail']} "
+                 f"({p['timeframe']})</font>")
+        # 'Improve your score' carries concrete, personalised sub-steps (the actual score drivers).
+        if p.get("how_steps"):
+            _cell += "".join(f"<br/><font size=7 color='#1f7a45'>&#8226; {s}</font>"
+                             for s in p["how_steps"])
         rows.append([
             Paragraph(str(i), CELL),
-            Paragraph(f"<b>{p['title']}</b><br/><font size=8 color='#52514e'>{p['detail']} "
-                      f"({p['timeframe']})</font>", CELL),
+            Paragraph(_cell, CELL),
             Paragraph(f"<b>+{p['readiness_gain_pts']}</b> pts", CELL),
             Paragraph(p["effort"], CELL),
             Paragraph(f"<font color='{_conf_color(p['confidence']).hexval()}'>&#9679;</font> "

@@ -11,8 +11,41 @@ Outputs feed both the on-screen plan and the PDF report.
 """
 from __future__ import annotations
 import os, json, math, copy, dataclasses
+from datetime import date
 from typing import Optional, List, Dict, Any
 from credit_engine import Answers, CreditRouter
+
+
+def _score_howto(ans: Answers) -> List[str]:
+    """Turn 'improve your credit score' into CONCRETE, personalised steps grounded in the
+    same behaviours the model measures (which are exactly the drivers of a FICO/CIBIL score:
+    payment history ~35%, amounts owed ~30%, history length ~15%, new credit ~10%, mix ~10%).
+    Never suggests immutable factors (age, dependents). Only surfaces steps relevant to THIS
+    applicant, so the advice is specific rather than generic."""
+    steps: List[str] = []
+    if ans.card_balance and ans.card_limit and ans.card_balance > 0.30 * ans.card_limit:
+        util = 100 * ans.card_balance / ans.card_limit
+        steps.append(f"Bring card utilisation from ~{util:.0f}% down under 30% — 'amounts owed' is "
+                     "about 30% of a score and moves fastest.")
+    if ans.enquiries_6m and ans.enquiries_6m > 0:
+        steps.append(f"Avoid new loan/card applications for 6 months so your {int(ans.enquiries_6m)} "
+                     "recent hard enquiry(ies) age off ('new credit' ~10%).")
+    if ans.has_default_record is True:
+        steps.append("Clear or formally dispute any default, write-off or legal record — a single "
+                     "derogatory mark weighs heavily on 'payment history' (~35%).")
+    if ans.missed_payment_2y:
+        steps.append("Pay every EMI and card bill on time from now on — payment history is the single "
+                     "biggest score component (~35%).")
+    if ans.instalment_outstanding_pct and ans.instalment_outstanding_pct > 40:
+        steps.append("Pay down your car / personal EMI loans so less of the original amount is "
+                     "outstanding, which lowers overall 'amounts owed'.")
+    if ans.first_credit_year and (date.today().year - ans.first_credit_year) < 5:
+        steps.append("Keep your oldest card / loan open — 'length of credit history' (~15%) lifts the "
+                     "score gradually, so don't close old accounts.")
+    if not steps:
+        steps.append("Keep paying every bill on time and hold card utilisation low — on the details you "
+                     "gave, your score behaviour is already close to optimal.")
+    return steps
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -190,6 +223,9 @@ def analyse(ans: Answers, router: CreditRouter) -> Dict[str, Any]:
             "approval_uplift_pp": round(appr_uplift * 100, 1),
             "sccf": sccf, "confidence": _confidence_badge(sccf),
             "sign_flip": bool(sccf is not None and raw_drop * causal_drop < 0),
+            # 'Improve your score' is decomposed into concrete, personalised behavioural
+            # steps (the actual drivers of a credit score) rather than a generic instruction.
+            "how_steps": _score_howto(ans) if lv["key"] == "score" else [],
         })
 
     # rank by causal readiness gain (desc); keep material ones (>= 1 readiness point)

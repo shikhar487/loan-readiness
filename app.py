@@ -219,11 +219,12 @@ if monthly_income > 0:
 # ======================================================================
 # 3 · Credit score — exact value OR a band
 # ======================================================================
-sub = ("Good news — for **unsecured** loans your score barely changes the result "
-       "(validation AUC 0.715 → 0.713 without it)."
+sub = ("Your credit score is a key, reliable input that lenders trust — please "
+       "enter it if you know it. If you are genuinely new to credit with no score, "
+       "we will switch to a model built for that case."
        if track == "unsecured" else
-       "For **secured** loans your score matters a lot — accuracy drops sharply "
-       "without it (validation AUC 0.739 → 0.663).")
+       "Your credit score is essential for a secured loan assessment — please "
+       "enter it. Without it the estimate is far less reliable.")
 section("3", "Credit score", sub)
 
 EXACT, BAND, NOSCORE = "I know my exact score", "I know the approximate range", "I don't have a credit score"
@@ -235,10 +236,20 @@ with st.container(border=True):
                            horizontal=True, key="tri_score", label_visibility="collapsed")
     if score_state in (EXACT, BAND):
         b1, b2 = st.columns(2)
-        credit_bureau = b1.selectbox("Which bureau?", list(BUREAU_RANGES))
+        # Only FICO is genuinely in the training data (LendingClub). Any other bureau
+        # score is accepted and RESCALED by its published range onto the FICO 300-850
+        # scale the model was trained on. We therefore expose two honest choices — the
+        # trained scale, or "another bureau" (all of CIBIL/Experian/Equifax/CRIF share
+        # the 300-900 range) — rather than implying the model was trained on each bureau.
+        BUREAU_CHOICES = {
+            "FICO (300–850) — the model's trained scale": "FICO",
+            "Another bureau — CIBIL / Experian / Equifax / CRIF (300–900)*": "CIBIL",
+        }
+        label = b1.selectbox("Which score do you have?", list(BUREAU_CHOICES))
+        credit_bureau = BUREAU_CHOICES[label]
         lo, hi = BUREAU_RANGES[credit_bureau]
         if score_state == EXACT:
-            credit_score = b2.number_input(f"Your {credit_bureau} score", lo, hi, min(750, hi))
+            credit_score = b2.number_input("Your score", lo, hi, min(750, hi))
         else:
             bands, v = [], lo
             while v < hi:
@@ -251,6 +262,10 @@ with st.container(border=True):
             credit_score = (pick[0] + pick[1]) / 2
             st.caption(f"We'll use the midpoint of your band ({credit_score:.0f}). "
                        "A band is far better than leaving it blank.")
+        if credit_bureau != "FICO":
+            st.caption("\\* Rescaled to the model's trained FICO range (300–850) by the "
+                       "bureau's published min–max. This assumes rank-equivalence across "
+                       "bureaus — a documented approximation, since the model is trained on FICO.")
     elif score_state == NOSCORE:
         st.caption("New to credit — we'll use the no-score model built for exactly this case.")
     elif score_state == UNSURE:
@@ -294,6 +309,10 @@ if track == "unsecured":
     section("4", "Your credit cards and history",
             'If you have no credit cards at all, choose "I don\'t have any" — that is '
             "different from not knowing the number.")
+    # Card utilisation is one of the most essential unsecured signals (its absence is
+    # among the largest single-feature AUC drops), so we require an ANSWER — though
+    # "I don't have any" is a perfectly valid, informative answer.
+    _required += [("cb", "Credit-card balance"), ("cl", "Credit-card limit")]
     u1, u2 = st.columns(2)
     with u1:
         card_balance, _ = tri_number("Total outstanding on all credit cards (₹)", "cb",
@@ -527,7 +546,7 @@ if go:
     else:
         band, icon, col = "High risk", "■", "var(--critical)"
 
-    section("7", "Your result")
+    section("7", "Your risk profile — as a lender would see it")
     r1, r2 = st.columns([0.44, 0.56])
     with r1:
         pct = min(risk / 0.6, 1.0) * 100
@@ -616,6 +635,10 @@ if go:
                 f'· {p["effort"]}, {p["timeframe"]} '
                 f'· <span style="color:{_cc.get(p["confidence"],"var(--ink-muted)")};">● {p["confidence"]} confidence</span></div>'
                 f'</div>', unsafe_allow_html=True)
+            if p.get("how_steps"):
+                with st.expander(f"↳ How to actually raise your score — {len(p['how_steps'])} steps for your profile"):
+                    for s in p["how_steps"]:
+                        st.markdown(f"- {s}")
 
         with st.expander("🔬 The causal reality-check — why our advice is different"):
             st.markdown(
@@ -640,3 +663,10 @@ if go:
     st.download_button("📄 Download my full improvement report (PDF)", data=pdf_bytes,
                        file_name="loan_readiness_report.pdf", mime="application/pdf",
                        type="primary", use_container_width=True)
+
+    st.caption(
+        "Note on amounts: you enter figures in ₹, but the models are trained on international "
+        "credit books (US and an anonymised foreign market). Rupee amounts are converted to "
+        "each model's trained scale before scoring; ratios like debt-to-income and utilisation "
+        "are currency-independent. Because the underlying loan and income distributions differ "
+        "from India, this is an indicative readiness estimate, not a lending decision.")

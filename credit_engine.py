@@ -147,6 +147,29 @@ def normalise_bureau_score(score: Optional[float], bureau: Optional[str]) -> Opt
     f_lo, f_hi = BUREAU_RANGES["FICO"]
     return f_lo + frac * (f_hi - f_lo)
 
+
+# --- currency normalisation ------------------------------------------------
+# The front end collects Indian Rupees, but the models were trained on foreign
+# books: LendingClub in USD, Home Credit in an anonymised currency. RAW AMOUNT
+# features must therefore be converted to each model's trained scale before
+# scoring. RATIO features (DTI, utilisation, LTV, credit/annuity-to-income) are
+# currency-invariant and are computed from the raw Rupee figures unchanged.
+# This is a documented approximation, disclosed in the UI — the model is
+# foreign-calibrated, so absolute-amount effects are indicative, not exact.
+INR_PER_USD = 83.0                                 # LendingClub (USD)
+# Home Credit's currency is anonymised, so no true FX exists. We anchor a typical
+# Indian annual income (~Rs 6,00,000) onto Home Credit's median income (~147,150
+# units), preserving loan-to-income ratios. Documented approximation.
+HC_AMOUNT_SCALE = 147150.0 / 600000.0              # ~0.245  (Rupees -> HC units)
+
+
+def _to_usd(x):
+    return None if x is None else x / INR_PER_USD
+
+
+def _to_hc(x):
+    return None if x is None else x * HC_AMOUNT_SCALE
+
 # ----------------------------------------------------------------------
 # Raw questionnaire answers
 # ----------------------------------------------------------------------
@@ -327,15 +350,16 @@ def derive(ans: Answers, today: Optional[date] = None) -> DerivedProfile:
     sec_years = (today.year - ans.first_secured_year) if ans.first_secured_year else None
 
     if track == "unsecured":
-        put("annual_inc", annual_inc)
+        # Raw amounts -> USD (the LC training scale); ratios stay currency-invariant.
+        put("annual_inc", _to_usd(annual_inc))
         put("dti", dti * 100 if dti is not None else None)   # LC stores DTI as %
         put("fico_score", fico)
-        put("loan_amnt", ans.loan_amount)
+        put("loan_amnt", _to_usd(ans.loan_amount))
         put("term_months", float(ans.term_months) if ans.term_months else None)
-        put("installment", installment)
+        put("installment", _to_usd(installment))
         put("payment_to_income", _safe_div(installment, ans.monthly_income))
         put("revol_util", _pct(_safe_div(ans.card_balance, ans.card_limit)))
-        put("revol_bal", ans.card_balance)
+        put("revol_bal", _to_usd(ans.card_balance))
         put("open_acc", _n(ans.num_credit_lines))
         put("inq_last_6mths", _n(ans.enquiries_6m))
         put("acc_open_past_24mths", _n(ans.new_accounts_24m))
@@ -352,14 +376,15 @@ def derive(ans: Answers, today: Optional[date] = None) -> DerivedProfile:
         # The customer already tells us what they still owe on home/vehicle loans.
         _mb = ans.secured_outstanding if ans.has_home_loan else (
             0.0 if ans.has_home_loan is False else None)
-        put("mortgage_bal", _mb)
+        put("mortgage_bal", _to_usd(_mb))
         put("mortgage_bal_to_income", _safe_div(_mb, annual_inc))
         put("il_util", ans.instalment_outstanding_pct)
     else:  # secured
-        put("AMT_INCOME_TOTAL", annual_inc)
-        put("AMT_CREDIT", ans.loan_amount)
-        put("AMT_ANNUITY", installment * 12 if installment is not None else None)
-        put("AMT_GOODS_PRICE", ans.asset_value)
+        # Raw amounts -> Home Credit's (anonymised) training scale; ratios stay invariant.
+        put("AMT_INCOME_TOTAL", _to_hc(annual_inc))
+        put("AMT_CREDIT", _to_hc(ans.loan_amount))
+        put("AMT_ANNUITY", _to_hc(installment * 12) if installment is not None else None)
+        put("AMT_GOODS_PRICE", _to_hc(ans.asset_value))
         put("EXT_SOURCE_2", _unit(fico))                 # primary score slot
         put("EXT_SOURCE_3", _unit_raw(ans.additional_score))
         put("AGE_YEARS", ans.age)
