@@ -152,6 +152,42 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
     ]))
     S.append(pt)
 
+    # ---- affordability of the applied loan (business rule, separate from the risk score) ----
+    from credit_engine import affordability as _afford, affordability_table as _afford_tbl
+    _aff = _afford(ans)
+    _at = _afford_tbl(ans)
+    if _aff and _at:
+        S.append(Paragraph("Can your income service this loan?", H2))
+        S.append(Paragraph(
+            f"Your existing EMIs are {_aff['existing_dti']*100:.0f}% of your income. Adding this "
+            f"loan's estimated EMI of about Rs {_aff['new_emi']:,.0f}/month takes your "
+            f"<b>proposed debt-to-income to {_aff['proposed_dti']*100:.0f}%</b>. The table below "
+            "shows the largest loan your income could service across a range of debt-to-income "
+            "levels, so you can read off whichever level you (or your lender) apply.", BODY))
+        _rows = [[Paragraph("DTI level", WHITEB),
+                  Paragraph("Max EMI room (Rs/mo)", WHITEB),
+                  Paragraph("Max loan serviceable", WHITEB)]]
+        for _row in _at["rows"]:
+            _rows.append([Paragraph(f"{int(_row['ceiling']*100)}%", CELL),
+                          Paragraph(f"Rs {_row['max_new_emi']:,.0f}", CELL),
+                          Paragraph(f"Rs {_row['max_loan']:,.0f}", CELL)])
+        _ft = Table(_rows, colWidths=[130, 150, 150], repeatRows=1)
+        _ft.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+            ("BOX", (0, 0), (-1, -1), 0.5, HAIR), ("INNERGRID", (0, 0), (-1, -1), 0.3, HAIR),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        S.append(_ft)
+        S.append(Paragraph("Read off the debt-to-income level you (or your lender) apply — we make "
+                 "no claim about which level a particular lender uses. A higher level means the "
+                 "EMIs take a larger share of income; levels above 100% need EMIs beyond a single "
+                 "income (e.g. a co-applicant). This affordability arithmetic is separate from, and "
+                 "does not change, the credit-risk assessment above.", SMALL))
+        S.append(Spacer(1, 6))
+
     # ---- action plan (core) ----
     S.append(Paragraph("Your personalised action plan", H2))
     S.append(Paragraph("Ranked by how much each change improves your readiness. The impact is "
@@ -260,6 +296,12 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
         "outcomes, chosen for your product type. Each action's impact is measured by re-scoring "
         "your profile with that one change, then <b>causally corrected</b> using double/debiased "
         "machine learning so the numbers reflect real effect, not mere correlation.", BODY))
+    S.append(Paragraph(
+        "The step-by-step tips for raising your credit score are behavioural best-practices, "
+        "personalised to your inputs and the four factors a bureau (CIBIL) score is built from — "
+        "repayment history, credit utilisation, recent enquiries, and credit age &amp; mix. The "
+        "score's effect on your risk is model-computed; the how-to steps are practical guidance, "
+        "not a separate prediction of your exact score change.", SMALL))
     S.append(Paragraph(
         "<b>Important:</b> this is an indicative loan-readiness estimate to help you improve your "
         "profile - it is not a lending decision or a guarantee of approval. Estimates are more "

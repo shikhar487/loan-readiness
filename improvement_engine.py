@@ -23,28 +23,49 @@ def _score_howto(ans: Answers) -> List[str]:
     Never suggests immutable factors (age, dependents). Only surfaces steps relevant to THIS
     applicant, so the advice is specific rather than generic."""
     steps: List[str] = []
+
+    # 1) Repayment history — the single biggest factor
+    if ans.missed_payment_2y or ans.has_default_record is True:
+        s = ("Fix and protect your repayment record — the biggest single factor in a CIBIL score. "
+             "Pay every EMI and card bill on time from now on (set auto-pay)")
+        if ans.has_default_record is True:
+            s += ", and clear or formally dispute any default / write-off / settled account on your report."
+        else:
+            s += " so the recent missed payment is followed by a clean streak."
+        steps.append(s)
+    else:
+        steps.append("Keep paying every EMI and credit-card bill on time — set auto-pay so you never "
+                     "miss a due date. Repayment history is the single biggest score factor.")
+
+    # 2) Credit utilisation — the fastest-moving factor
     if ans.card_balance and ans.card_limit and ans.card_balance > 0.30 * ans.card_limit:
         util = 100 * ans.card_balance / ans.card_limit
-        steps.append(f"Bring card utilisation from ~{util:.0f}% down under 30% — 'amounts owed' is "
-                     "about 30% of a score and moves fastest.")
+        steps.append(f"Bring your credit-card usage from ~{util:.0f}% down below 30% of your limit "
+                     "(pay down balances, or ask for a limit increase without spending more) — "
+                     "utilisation is the fastest-moving score factor.")
+    else:
+        steps.append("Keep total credit-card usage under 30% of your limit every month — low, steady "
+                     "utilisation is one of the strongest positives for the score.")
+
+    # 3) Recent credit-seeking / enquiries
     if ans.enquiries_6m and ans.enquiries_6m > 0:
-        steps.append(f"Avoid new loan/card applications for 6 months so your {int(ans.enquiries_6m)} "
-                     "recent hard enquiry(ies) age off ('new credit' ~10%).")
-    if ans.has_default_record is True:
-        steps.append("Clear or formally dispute any default, write-off or legal record — a single "
-                     "derogatory mark weighs heavily on 'payment history' (~35%).")
-    if ans.missed_payment_2y:
-        steps.append("Pay every EMI and card bill on time from now on — payment history is the single "
-                     "biggest score component (~35%).")
+        steps.append(f"Avoid new loan or card applications for the next 6 months so your "
+                     f"{int(ans.enquiries_6m)} recent hard enquiry(ies) age off — each fresh "
+                     "application dips the score briefly.")
+    else:
+        steps.append("Space out any new credit applications — apply only when you genuinely need it, "
+                     "since each hard enquiry temporarily lowers the score.")
+
+    # 4) Credit age & mix / overall debt load
     if ans.instalment_outstanding_pct and ans.instalment_outstanding_pct > 40:
         steps.append("Pay down your car / personal EMI loans so less of the original amount is "
-                     "outstanding, which lowers overall 'amounts owed'.")
-    if ans.first_credit_year and (date.today().year - ans.first_credit_year) < 5:
-        steps.append("Keep your oldest card / loan open — 'length of credit history' (~15%) lifts the "
-                     "score gradually, so don't close old accounts.")
-    if not steps:
-        steps.append("Keep paying every bill on time and hold card utilisation low — on the details you "
-                     "gave, your score behaviour is already close to optimal.")
+                     "outstanding — a lower overall debt load helps the score.")
+    elif ans.first_credit_year and (date.today().year - ans.first_credit_year) < 5:
+        steps.append("Keep your oldest card or loan open and active — a longer credit history and a "
+                     "healthy mix of loan types lift the score gradually.")
+    else:
+        steps.append("Don't close your oldest card, keep a healthy mix of credit types, and check "
+                     "your bureau (CIBIL) report once a year for errors you can dispute.")
     return steps
 
 BASE = os.path.dirname(os.path.abspath(__file__))

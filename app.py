@@ -214,7 +214,15 @@ with a2:
     term_months = st.selectbox("Repayment period (months)",
                                [12, 24, 36, 48, 60, 84, 120, 180, 240, 300], index=2)
 if monthly_income > 0:
-    chip(f"Debt-to-income derived: **{monthly_emi/monthly_income*100:.1f}%** — you never enter this yourself")
+    chip(f"Existing debt-to-income derived: **{monthly_emi/monthly_income*100:.1f}%** — "
+         "your current EMIs over income (you never enter this yourself)")
+    if loan_amount and term_months:
+        from credit_engine import _amortised_installment, _rate_from_score
+        _new_emi = _amortised_installment(loan_amount, _rate_from_score(None), term_months)
+        _prop_dti = (monthly_emi + _new_emi) / monthly_income * 100
+        chip(f"Proposed debt-to-income after this loan (approx.): **{_prop_dti:.0f}%** — existing "
+             f"EMIs plus this loan's estimated EMI of ~₹{_new_emi:,.0f}/mo. Refined below once you "
+             "add your credit score.")
 
 # ======================================================================
 # 3 · Credit score — exact value OR a band
@@ -309,10 +317,10 @@ if track == "unsecured":
     section("4", "Your credit cards and history",
             'If you have no credit cards at all, choose "I don\'t have any" — that is '
             "different from not knowing the number.")
-    # Card utilisation is one of the most essential unsecured signals (its absence is
-    # among the largest single-feature AUC drops), so we require an ANSWER — though
-    # "I don't have any" is a perfectly valid, informative answer.
-    _required += [("cb", "Credit-card balance"), ("cl", "Credit-card limit")]
+    # Note: every tri-state input (card balance/limit incl.) is already a REQUIRED
+    # answer — the tri_number / tri_select / tri_yesno helpers auto-register it. So all
+    # essential inputs on both tracks must be answered, though "I don't have any" / "Not
+    # sure" remain valid, informative answers (they distinguish a true zero from unknown).
     u1, u2 = st.columns(2)
     with u1:
         card_balance, _ = tri_number("Total outstanding on all credit cards (₹)", "cb",
@@ -582,6 +590,54 @@ if go:
 
     for note in res["notes"]:
         st.info(note, icon="ℹ️")
+
+    # --- Affordability of the applied loan — a SEPARATE, ADDITIONAL layer -------------------
+    # This does NOT touch the risk model above (which is unchanged and drives the risk %). It is
+    # pure arithmetic on the customer's own inputs: the PROPOSED debt-to-income (existing EMIs +
+    # this loan's EMI, over income) and the loan serviceable at a DTI level the CUSTOMER chooses.
+    # We make no assumption about what any lender allows.
+    from credit_engine import affordability, affordability_table
+    if monthly_income and loan_amount and term_months:
+        st.divider()
+        st.markdown("###### Can your income service this loan? *(a separate affordability check — "
+                    "the credit-risk assessment above is unchanged)*")
+        target_pct = st.slider("The debt-to-income level you want to check against", 30, 100, 50, 5,
+                             format="%d%%",
+                             help="Set the DTI level you are comfortable with, or that your lender "
+                                  "applies. We do not assume this — you decide. The serviceable "
+                                  "amount below is computed against whatever you set here.")
+        aff = affordability(ans, ceiling=target_pct / 100.0)
+        if aff:
+            a1, a2, a3 = st.columns(3)
+            a1.metric("Your EMI on this loan", f"₹{aff['new_emi']:,.0f}/mo")
+            a2.metric("Proposed debt-to-income", f"{aff['proposed_dti']*100:.0f}%",
+                      help="Your existing EMIs plus this loan's EMI, as a share of income. (The DTI "
+                           "the risk model uses above is existing obligations only — this is an "
+                           "additional figure, it does not change the model.)")
+            a3.metric(f"Serviceable at {target_pct}%", f"₹{aff['max_serviceable_loan']:,.0f}",
+                      help=f"The largest loan whose EMI keeps your proposed DTI within {target_pct}%.")
+            _fn = st.success if aff["verdict"] == "within" else st.warning
+            _ic = "✅" if aff["verdict"] == "within" else "⚠️"
+            _msg = aff["note"]
+            if aff["verdict"] == "exceeds" and aff["max_serviceable_loan"] < loan_amount:
+                _msg += (f" At the {target_pct}% level, about **₹{aff['max_serviceable_loan']:,.0f}** "
+                         "would fit over the same term.")
+            _fn(_msg, icon=_ic)
+            # reference table: serviceable loan across a range of DTI levels (neutral)
+            at = affordability_table(ans)
+            if at:
+                import pandas as _pd
+                st.markdown("**Loan serviceable at different debt-to-income levels**")
+                _df = _pd.DataFrame([{
+                    "DTI level": f"{int(row['ceiling']*100)}%",
+                    "Max EMI room (₹/mo)": f"₹{row['max_new_emi']:,.0f}",
+                    "Max loan serviceable": f"₹{row['max_loan']:,.0f}",
+                } for row in at["rows"]])
+                st.table(_df)
+                st.caption("Read off the level you (or your lender) apply. A higher level means the "
+                           "EMIs take a larger share of your income; levels above 100% need EMIs "
+                           "beyond a single income (e.g. a co-applicant). We make no claim about "
+                           "which level a particular lender uses.")
 
     if res["tier"] == 0 and track == "secured":
         st.error("**Precision note** — for a secured loan, not having a credit score reduces "

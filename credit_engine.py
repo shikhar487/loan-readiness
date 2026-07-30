@@ -283,6 +283,74 @@ def _rate_from_score(fico: Optional[float]) -> float:
     if fico >= 600: return 16.0
     return 19.0
 
+
+def affordability(ans: "Answers", ceiling: float = 0.50):
+    """Serviceability check on the APPLIED loan — a business rule, separate from the ML risk model.
+
+    The risk model is trained on US personal loans (max ~$40k) and cannot judge gross
+    unaffordability: a very large loan falls outside its range, so its risk score saturates.
+    Lenders never rely on the score alone for this — they apply a debt-to-income ceiling. This
+    computes the PROPOSED (applied) DTI = (existing EMIs + the new loan's EMI) / income, a verdict,
+    and the largest loan the income could comfortably service at that ceiling.
+    """
+    inc = ans.monthly_income
+    if not inc or inc <= 0 or not ans.loan_amount or not ans.term_months:
+        return None
+    rate = _rate_from_score(normalise_bureau_score(ans.credit_score, ans.credit_bureau))
+    new_emi = _amortised_installment(ans.loan_amount, rate, int(ans.term_months))
+    existing = ans.monthly_emi_existing or 0.0
+    proposed_dti = (existing + new_emi) / inc
+    # Verdict is purely RELATIVE to the DTI level the USER supplies — we make no assumption about
+    # what any lender allows. (This affordability arithmetic is entirely separate from the ML risk
+    # model, which is unchanged; it neither feeds the model nor alters the risk score.)
+    if proposed_dti <= ceiling:
+        verdict = "within"
+        note = (f"Your proposed debt-to-income of {proposed_dti*100:.0f}% is within the "
+                f"{ceiling*100:.0f}% level you set.")
+    else:
+        verdict = "exceeds"
+        note = (f"Your proposed debt-to-income of {proposed_dti*100:.0f}% exceeds the "
+                f"{ceiling*100:.0f}% level you set — the EMIs would take more of your income than "
+                "that. A smaller loan amount or a longer term would bring it within.")
+    # largest loan whose EMI keeps total DTI at/under the ceiling
+    max_new_emi = max(0.0, ceiling * inc - existing)
+    r = rate / 12.0 / 100.0
+    n = int(ans.term_months)
+    if max_new_emi <= 0:
+        max_loan = 0.0
+    elif r > 0:
+        max_loan = max_new_emi * (1 - (1 + r) ** (-n)) / r
+    else:
+        max_loan = max_new_emi * n
+    return {"new_emi": new_emi, "existing_emi": existing, "existing_dti": existing / inc,
+            "proposed_dti": proposed_dti, "verdict": verdict, "note": note,
+            "max_serviceable_loan": max_loan, "ceiling": ceiling, "rate_pct": rate}
+
+
+def affordability_table(ans: "Answers", ceilings=(0.50, 0.75, 1.00, 1.25, 1.50)):
+    """The loan an income could service across a RANGE of debt-to-income levels — a neutral
+    reference (we do not assume which level any lender applies). A higher level simply means the
+    EMIs take a larger share of income; levels above 100% require EMIs beyond a single income."""
+    inc = ans.monthly_income
+    if not inc or inc <= 0 or not ans.term_months:
+        return None
+    rate = _rate_from_score(normalise_bureau_score(ans.credit_score, ans.credit_bureau))
+    existing = ans.monthly_emi_existing or 0.0
+    r = rate / 12.0 / 100.0
+    n = int(ans.term_months)
+    rows = []
+    for c in ceilings:
+        max_new_emi = max(0.0, c * inc - existing)
+        if max_new_emi <= 0:
+            max_loan = 0.0
+        elif r > 0:
+            max_loan = max_new_emi * (1 - (1 + r) ** (-n)) / r
+        else:
+            max_loan = max_new_emi * n
+        rows.append({"ceiling": c, "max_new_emi": max_new_emi, "max_loan": max_loan})
+    return {"rate_pct": rate, "term_months": n, "existing_emi": existing, "income": inc, "rows": rows}
+
+
 def _safe_div(a, b):
     """Divide only when BOTH inputs exist and denominator is non-zero."""
     if a is None or b is None:
