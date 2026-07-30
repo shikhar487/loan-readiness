@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Credit Intelligence — Project Access</title>
+<style>
+  :root{
+    --bg1:#eef2fb; --bg2:#e7ecf7; --card:#ffffff; --ink:#1b2430; --soft:#54607a; --faint:#8791a6;
+    --accent:#2a5fc9; --accent2:#1d3d7c; --accent-soft:#e9eff9; --line:#e2e7f1;
+    --good:#1f7a45; --shadow:0 1px 2px rgba(20,30,60,.05), 0 12px 34px rgba(20,30,60,.10);
+    --disp:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --body:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg1:#0a0e16; --bg2:#0d1320; --card:#131a28; --ink:#e7eaf1; --soft:#a4adbf; --faint:#727d94;
+    --accent:#7ba0e6; --accent2:#a9c2f0; --accent-soft:#182643; --line:#26303f; --good:#5cc98c;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 14px 40px rgba(0,0,0,.5);}}
+  :root[data-theme="dark"]{--bg1:#0a0e16;--bg2:#0d1320;--card:#131a28;--ink:#e7eaf1;--soft:#a4adbf;
+    --faint:#727d94;--accent:#7ba0e6;--accent2:#a9c2f0;--accent-soft:#182643;--line:#26303f;--good:#5cc98c;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 14px 40px rgba(0,0,0,.5);}
+  :root[data-theme="light"]{--bg1:#eef2fb;--bg2:#e7ecf7;--card:#fff;--ink:#1b2430;--soft:#54607a;
+    --faint:#8791a6;--accent:#2a5fc9;--accent2:#1d3d7c;--accent-soft:#e9eff9;--line:#e2e7f1;--good:#1f7a45;
+    --shadow:0 1px 2px rgba(20,30,60,.05), 0 12px 34px rgba(20,30,60,.10);}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{min-height:100vh;font-family:var(--body);color:var(--ink);
+    background:radial-gradient(1200px 600px at 50% -10%, var(--bg2), var(--bg1));
+    display:flex;align-items:center;justify-content:center;padding:32px 18px;-webkit-font-smoothing:antialiased}
+  .card{width:100%;max-width:680px;background:var(--card);border:1px solid var(--line);
+    border-radius:22px;box-shadow:var(--shadow);padding:38px 38px 30px}
+  @media(max-width:560px){.card{padding:26px 22px}}
+  .eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent2);background:var(--accent-soft);display:inline-block;padding:5px 11px;border-radius:6px}
+  h1{font-family:var(--disp);font-size:2rem;line-height:1.12;margin:16px 0 8px;letter-spacing:-.01em}
+  .dek{color:var(--soft);font-size:1.02rem;max-width:56ch;margin-bottom:22px}
+  .cta{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
+    background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;text-decoration:none;
+    font-weight:640;font-size:1.06rem;padding:16px 20px;border-radius:13px;margin-bottom:8px;
+    box-shadow:0 8px 22px rgba(42,95,201,.28);transition:transform .08s ease}
+  .cta:hover{transform:translateY(-1px)}
+  .cta .arw{font-size:1.15rem}
+  .hint{text-align:center;color:var(--faint);font-size:.8rem;margin-bottom:22px}
+  .links{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px}
+  @media(max-width:560px){.links{grid-template-columns:1fr}}
+  .link{display:block;text-decoration:none;color:var(--ink);border:1px solid var(--line);
+    border-radius:12px;padding:14px 16px;transition:border-color .12s, background .12s}
+  .link:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .link .t{font-weight:640;font-size:.95rem;display:flex;align-items:center;gap:8px}
+  .link .d{color:var(--soft);font-size:.8rem;margin-top:3px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:22px}
+  @media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--card);padding:13px 12px;text-align:center}
+  .stat .n{font-family:var(--mono);font-weight:650;font-size:1.05rem;color:var(--accent2)}
+  .stat .l{font-size:.68rem;color:var(--faint);margin-top:3px;line-height:1.25}
+  .foot{border-top:1px solid var(--line);padding-top:16px;color:var(--faint);font-size:.8rem;line-height:1.5}
+  .foot b{color:var(--soft);font-weight:600}
+</style>
+</head>
+<body>
+  <main class="card">
+    <span class="eyebrow">IIM Ahmedabad · ePGD-ABA Capstone</span>
+    <h1>From Predictive Underwriting to<br>Adaptive Credit Intelligence</h1>
+    <p class="dek">A credit-risk system that predicts default, explains it, tests whether its
+      advice is <em>causally</em> real, and gives the borrower a personalised improvement plan.</p>
+
+    <a class="cta" href="https://shikhar487-loan-readiness-app-flvwtj.streamlit.app" target="_blank" rel="noopener">
+      <span>🖥️ Open the Live App</span><span class="arw">→</span></a>
+    <p class="hint">The interactive customer portal — try a profile end to end. Loads immediately; if it shows a "wake up" prompt, click it and wait ~30 s.</p>
+
+    <div class="links">
+      <a class="link" href="https://github.com/shikhar487/loan-readiness/blob/main/Capstone_Final_Report.pdf" target="_blank" rel="noopener">
+        <span class="t">📄 Final Report</span>
+        <span class="d">46-page report (PDF, opens in browser)</span></a>
+      <a class="link" href="https://github.com/shikhar487/loan-readiness" target="_blank" rel="noopener">
+        <span class="t">💻 Source Code</span>
+        <span class="d">GitHub repo + change history</span></a>
+      <a class="link" href="PASTE_YOUR_GOOGLE_DRIVE_LINK_HERE" target="_blank" rel="noopener">
+        <span class="t">📁 Full Document Set</span>
+        <span class="d">Defense record, study guide, dictionaries</span></a>
+      <a class="link" href="https://github.com/shikhar487/loan-readiness/blob/main/Capstone_Final_Report.pdf" target="_blank" rel="noopener">
+        <span class="t">🧭 How to Review</span>
+        <span class="d">Read the report's Chapter 1 &amp; 5</span></a>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="n">2.26M+307K</div><div class="l">loans modelled</div></div>
+      <div class="stat"><div class="n">0.72 / 0.74</div><div class="l">unsec / sec AUC</div></div>
+      <div class="stat"><div class="n">SCCF</div><div class="l">causal correction</div></div>
+      <div class="stat"><div class="n">Live</div><div class="l">customer portal</div></div>
+    </div>
+
+    <div class="foot">
+      <b>Team:</b> Riya Kakkar · Shikhar Taneja · Pitransh Mathuria · Pruthiv Rajan<br>
+      Advanced Business Analytics (ePGD-ABA), Indian Institute of Management Ahmedabad · 2025–26
+    </div>
+  </main>
+</body>
+</html>
