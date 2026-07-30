@@ -373,7 +373,7 @@ else:
 
     # ---- heading + wording adapt to product AND scenario ----
     NOUN = {"home_loan": "property", "loan_against_property": "property",
-            "auto_loan": "vehicle", "consumer_durable": "item"}[product]
+            "auto_loan": "vehicle"}[product]
     if asset_scenario == "mortgage_existing":
         head = f"The {NOUN} you will mortgage"
         sub4 = (f"Enter details of the {NOUN} you **already own** and will pledge as security "

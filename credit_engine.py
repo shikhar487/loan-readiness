@@ -32,13 +32,13 @@ import math
 UNSECURED_PRODUCTS = {
     "personal_loan": "Personal loan",
     "balance_transfer": "Credit-card balance transfer",
+    "consumer_durable": "Consumer-durable loan",   # no collateral taken -> unsecured
     "education_loan": "Education loan",
 }
 SECURED_PRODUCTS = {
     "home_loan": "Home loan",
     "loan_against_property": "Loan against property",
     "auto_loan": "Auto loan",
-    "consumer_durable": "Consumer-durable loan",
 }
 
 def route_product(product_key: str) -> str:
