@@ -654,17 +654,18 @@ if go:
     # this loan's EMI, over income) and the loan serviceable at a DTI level the CUSTOMER chooses.
     # We make no assumption about what any lender allows.
     from credit_engine import affordability, affordability_table
-    target_pct = 50   # default DTI level; the slider below overrides it when shown
+    target_pct = 100   # default DTI level (full income); the slider below overrides it when shown
     aff = None
     if monthly_income and loan_amount and term_months:
         st.divider()
         st.markdown("###### Can your income service this loan? *(a separate affordability check — "
                     "the credit-risk assessment above is unchanged)*")
-        target_pct = st.slider("The debt-to-income level you want to check against", 30, 100, 50, 5,
+        target_pct = st.slider("The debt-to-income level you want to check against", 30, 100, 100, 5,
                              format="%d%%",
                              help="Set the DTI level you are comfortable with, or that your lender "
-                                  "applies. We do not assume this — you decide. The serviceable "
-                                  "amount below is computed against whatever you set here.")
+                                  "applies — lenders vary widely, some allow up to 100% of income. We "
+                                  "do not assume any single level; you decide. The serviceable amount "
+                                  "below is computed against whatever you set here.")
         aff = affordability(ans, ceiling=target_pct / 100.0)
         if aff:
             st.caption(f"All figures below are computed at the interest rate you entered — "
