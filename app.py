@@ -246,10 +246,25 @@ if _inc_basis > 0:
     if loan_amount and term_months:
         from credit_engine import _amortised_installment, _rate_from_score
         _new_emi = _amortised_installment(loan_amount, _rate_from_score(None), term_months)
+        _existing_dti = monthly_emi / _inc_basis * 100
         _prop_dti = (monthly_emi + _new_emi) / _inc_basis * 100
-        chip(f"Proposed debt-to-income after this loan (approx.): **{_prop_dti:.0f}%** — existing "
-             f"EMIs plus this loan's estimated EMI of ~₹{_new_emi:,.0f}/mo. Refined below once you "
-             "add your credit score.")
+        # Existing debt is manageable but the requested loan makes the proposed position unaffordable
+        # (proposed DTI >= 100% => the new EMI alone would exceed income). Flag it in red, and be
+        # explicit that the risk advisory/report reflect the existing position, not this outsized loan.
+        if _prop_dti >= 100 and _existing_dti < 100:
+            st.error(
+                f"⚠️ **Proposed debt-to-income of {_prop_dti:.0f}% is very high.** Your existing debt is "
+                f"low ({_existing_dti:.1f}%), but the EMI on this loan (~₹{_new_emi:,.0f}/mo) would take "
+                "far more than your whole income. **Please note:** the risk assessment and improvement "
+                "plan you receive after completing the form reflect your **existing debt and current "
+                "credit position only** — a loan of this size is not treated as serviceable, and its "
+                "affordability is assessed separately in the serviceability check below. To borrow an "
+                "amount like this you would need to add a co-applicant's income, choose a longer term, "
+                "or request a smaller amount.", icon="⚠️")
+        else:
+            chip(f"Proposed debt-to-income after this loan (approx.): **{_prop_dti:.0f}%** — existing "
+                 f"EMIs plus this loan's estimated EMI of ~₹{_new_emi:,.0f}/mo. Refined below once you "
+                 "add your credit score.")
 
 # ======================================================================
 # 3 · Credit score — exact value OR a band
