@@ -219,6 +219,16 @@ with a2:
              "It is used only for the affordability (debt-servicing) check — it does NOT change the "
              "credit-risk model, which assesses you on your own profile.")
 
+# Expected interest rate — the ONLY rate the affordability utility uses. The tool assumes no rate of
+# its own; if left at 0, the EMI / proposed-DTI / serviceable-amount figures are simply not estimated.
+expected_roi = st.number_input(
+    "Expected interest rate on this loan (% per year)", 0.0, 100.0, 0.0, 0.25, format="%.2f",
+    help="Enter the rate you expect, or that your lender has quoted. This is the ONLY interest rate "
+         "the affordability estimates use — the tool assumes no rate of its own.")
+st.caption("The affordability figures below use the interest rate you enter here — the model does not "
+           "assume any rate. It is a good idea to confirm your applicable ROI with the lender to get "
+           "the most accurate results from this utility.")
+
 # Combined household income powers the affordability / DTI serviceability view (never the risk model).
 combined_income = monthly_income + coapplicant_income
 _inc_basis = combined_income if coapplicant_income > 0 else monthly_income
@@ -243,9 +253,9 @@ if _inc_basis > 0:
     _extra = f"; combined income ₹{_inc_basis:,.0f}/mo" if coapplicant_income > 0 else ""
     chip(f"Existing debt-to-income derived: **{monthly_emi/_inc_basis*100:.1f}%** — "
          f"your current EMIs over {_basis_lbl} (you never enter this yourself){_extra}")
-    if loan_amount and term_months:
-        from credit_engine import _amortised_installment, _rate_from_score
-        _new_emi = _amortised_installment(loan_amount, _rate_from_score(None), term_months)
+    if loan_amount and term_months and expected_roi and expected_roi > 0:
+        from credit_engine import _amortised_installment
+        _new_emi = _amortised_installment(loan_amount, expected_roi, term_months)
         _existing_dti = monthly_emi / _inc_basis * 100
         _prop_dti = (monthly_emi + _new_emi) / _inc_basis * 100
         # Existing debt is manageable but the requested loan makes the proposed position unaffordable
@@ -254,17 +264,20 @@ if _inc_basis > 0:
         if _prop_dti >= 100 and _existing_dti < 100:
             st.error(
                 f"⚠️ **Proposed debt-to-income of {_prop_dti:.0f}% is very high.** Your existing debt is "
-                f"low ({_existing_dti:.1f}%), but the EMI on this loan (~₹{_new_emi:,.0f}/mo) would take "
-                "far more than your whole income. **Please note:** the risk assessment and improvement "
-                "plan you receive after completing the form reflect your **existing debt and current "
-                "credit position only** — a loan of this size is not treated as serviceable, and its "
-                "affordability is assessed separately in the serviceability check below. To borrow an "
-                "amount like this you would need to add a co-applicant's income, choose a longer term, "
-                "or request a smaller amount.", icon="⚠️")
+                f"low ({_existing_dti:.1f}%), but the EMI on this loan (~₹{_new_emi:,.0f}/mo at "
+                f"{expected_roi:.2f}% p.a.) would take far more than your whole income. **Please note:** "
+                "the risk assessment and improvement plan you receive after completing the form reflect "
+                "your **existing debt and current credit position only** — a loan of this size is not "
+                "treated as serviceable, and its affordability is assessed separately in the "
+                "serviceability check below. To borrow an amount like this you would need to add a "
+                "co-applicant's income, choose a longer term, or request a smaller amount.", icon="⚠️")
         else:
             chip(f"Proposed debt-to-income after this loan (approx.): **{_prop_dti:.0f}%** — existing "
-                 f"EMIs plus this loan's estimated EMI of ~₹{_new_emi:,.0f}/mo. Refined below once you "
-                 "add your credit score.")
+                 f"EMIs plus this loan's estimated EMI of ~₹{_new_emi:,.0f}/mo at {expected_roi:.2f}% "
+                 "p.a. (the rate you entered).")
+    elif loan_amount and term_months:
+        chip("Enter your expected interest rate above to estimate this loan's EMI, your proposed "
+             "debt-to-income, and the amount your income could service.")
 
 # ======================================================================
 # 3 · Credit score — exact value OR a band
@@ -563,6 +576,7 @@ if go:
     ans = Answers(
         product=product, monthly_income=monthly_income or None,
         coapplicant_income=coapplicant_income or None,
+        expected_roi=expected_roi or None,
         monthly_emi_existing=monthly_emi, credit_score=credit_score,
         credit_bureau=credit_bureau, additional_score=additional_score,
         additional_score_type=additional_score_type,
@@ -653,6 +667,9 @@ if go:
                                   "amount below is computed against whatever you set here.")
         aff = affordability(ans, ceiling=target_pct / 100.0)
         if aff:
+            st.caption(f"All figures below are computed at the interest rate you entered — "
+                       f"**{aff['rate_pct']:.2f}% per year**. Confirm your applicable rate with the "
+                       "lender for the most accurate results; the model assumes no rate of its own.")
             a1, a2, a3 = st.columns(3)
             a1.metric("Your EMI on this loan", f"₹{aff['new_emi']:,.0f}/mo")
             a2.metric("Proposed debt-to-income", f"{aff['proposed_dti']*100:.0f}%",
@@ -660,7 +677,8 @@ if go:
                            "the risk model uses above is existing obligations only — this is an "
                            "additional figure, it does not change the model.)")
             a3.metric(f"Serviceable at {target_pct}%", f"₹{aff['max_serviceable_loan']:,.0f}",
-                      help=f"The largest loan whose EMI keeps your proposed DTI within {target_pct}%.")
+                      help=f"The largest loan whose EMI keeps your proposed DTI within {target_pct}%, "
+                           "at the interest rate you entered.")
             _fn = st.success if aff["verdict"] == "within" else st.warning
             _ic = "✅" if aff["verdict"] == "within" else "⚠️"
             _msg = aff["note"]
@@ -668,6 +686,10 @@ if go:
                 _msg += (f" At the {target_pct}% level, about **₹{aff['max_serviceable_loan']:,.0f}** "
                          "would fit over the same term.")
             _fn(_msg, icon=_ic)
+        elif not (expected_roi and expected_roi > 0):
+            st.info("Enter your **expected interest rate** in section 2 above to see this loan's EMI, "
+                    "your proposed debt-to-income, and the largest amount your income could service. "
+                    "The tool does not assume a rate — it uses only the one you provide.", icon="ℹ️")
             # reference table: serviceable loan across a range of DTI levels (neutral)
             at = affordability_table(ans)
             if at:

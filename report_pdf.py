@@ -160,7 +160,8 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
         S.append(Paragraph("Can your income service this loan?", H2))
         S.append(Paragraph(
             f"Your existing EMIs are {_aff['existing_dti']*100:.0f}% of your income. Adding this "
-            f"loan's estimated EMI of about Rs {_aff['new_emi']:,.0f}/month takes your "
+            f"loan's estimated EMI of about Rs {_aff['new_emi']:,.0f}/month (at the "
+            f"{_aff['rate_pct']:.2f}% per year interest rate you entered) takes your "
             f"<b>proposed debt-to-income to {_aff['proposed_dti']*100:.0f}%</b>. The table below "
             "shows the largest loan your income could service across a range of debt-to-income "
             "levels, so you can read off whichever level you (or your lender) apply.", BODY))
@@ -184,7 +185,9 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
         S.append(Paragraph("Read off the debt-to-income level you (or your lender) apply — we make "
                  "no claim about which level a particular lender uses. A higher level means the "
                  "EMIs take a larger share of income; levels above 100% need EMIs beyond a single "
-                 "income (e.g. a co-applicant). This affordability arithmetic is separate from, and "
+                 "income (e.g. a co-applicant). All amounts use the interest rate you entered; the "
+                 "tool assumes no rate of its own, so confirm your applicable rate with the lender "
+                 "for the most accurate figures. This affordability arithmetic is separate from, and "
                  "does not change, the credit-risk assessment above.", SMALL))
         S.append(Spacer(1, 6))
 
