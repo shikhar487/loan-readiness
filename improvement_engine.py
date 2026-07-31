@@ -212,7 +212,38 @@ def _confidence_badge(sccf):
     return "Low"
 
 # ---------------------------------------------------------------------------
-def analyse(ans: Answers, router: CreditRouter) -> Dict[str, Any]:
+# Which KEY answerable inputs the customer left blank ("not sure" / skipped).
+# Reported in plain language so a thin form explains itself instead of failing
+# silently. These are the inputs that unlock the improvement levers above.
+# ---------------------------------------------------------------------------
+def _missing_answers(ans: Answers, track: str) -> List[str]:
+    common = [
+        (ans.credit_score is None,                              "your credit score"),
+        (ans.monthly_emi_existing is None,                      "your total existing monthly EMIs"),
+        (ans.first_credit_year is None,                         "the year of your first loan or card"),
+    ]
+    if track == "unsecured":
+        items = common + [
+            (ans.card_balance is None or ans.card_limit is None, "your credit-card balance and total limit"),
+            (ans.enquiries_6m is None,                          "loan/card applications in the last 6 months"),
+            (ans.missed_payment_2y is None,                     "whether you missed any payment in 2 years"),
+            (ans.has_default_record is None,                    "whether you have any default / write-off record"),
+        ]
+    else:
+        items = common + [
+            (ans.asset_value is None,                           "the market value of the asset"),
+            (ans.enquiries_12m is None,                         "credit enquiries in the last 12 months"),
+            (ans.owns_property is None,                         "whether you already own property"),
+            (ans.owns_car is None,                              "whether you own a car"),
+        ]
+    return [label for cond, label in items if cond]
+
+# ---------------------------------------------------------------------------
+def analyse(ans: Answers, router: CreditRouter, afford: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """`afford` is the (optional) result of credit_engine.affordability(), computed against the
+    DTI level the CUSTOMER chose. When the requested loan is not serviceable on the stated income,
+    it becomes the HEADLINE recommendation — the risk model saturates on out-of-range amounts and
+    cannot express gross unaffordability on its own, so we surface this arithmetic result instead."""
     base = router.predict(ans)
     track = base["track"]
     pd0 = base["risk"]
@@ -267,6 +298,39 @@ def analyse(ans: Answers, router: CreditRouter) -> Dict[str, Any]:
     avg_sccf = (sum(sccfs) / len(sccfs)) if sccfs else 1.0
     pd_after = pd0 - (pd0 - pd_raw_after) * min(avg_sccf, 1.0)   # causal-discounted
 
+    # -- affordability-driven headline action (arithmetic, NOT the risk model) --------
+    # If the requested loan cannot be serviced at the customer's chosen DTI level, that is the
+    # single most useful recommendation — and one the saturated risk model cannot produce.
+    afford_action = None
+    if (afford and afford.get("verdict") == "exceeds"
+            and ans.loan_amount and afford.get("max_serviceable_loan", 0) < ans.loan_amount):
+        afford_action = {
+            "requested": float(ans.loan_amount),
+            "max_serviceable_loan": float(afford["max_serviceable_loan"]),
+            "proposed_dti_pct": round(afford["proposed_dti"] * 100),
+            "existing_dti_pct": round(afford.get("existing_dti", 0.0) * 100),
+            "ceiling_pct": round(afford["ceiling"] * 100),
+            "new_emi": float(afford["new_emi"]),
+            "term_months": int(ans.term_months) if ans.term_months else None,
+            "shortfall": float(ans.loan_amount - afford["max_serviceable_loan"]),
+            "no_capacity": bool(afford.get("no_capacity")),
+        }
+
+    # -- completeness / coverage summary (Point 3) -----------------------------------
+    missing_answers = _missing_answers(ans, track)
+    coverage_pct = int(round((base.get("coverage") or 0) * 100))
+
+    # -- always give a verdict: never a blank screen ---------------------------------
+    # Priority: unaffordable request > missing-inputs prompt > genuinely-strong profile.
+    fallback = None
+    if not plan:
+        if afford_action:
+            fallback = {"kind": "affordability"}
+        elif missing_answers:
+            fallback = {"kind": "coverage", "missing": missing_answers}
+        else:
+            fallback = {"kind": "strong"}   # nothing left to improve on what we know
+
     return {
         "track": track,
         "pd_now": pd0,
@@ -279,6 +343,11 @@ def analyse(ans: Answers, router: CreditRouter) -> Dict[str, Any]:
         "products_after": products_qualified(pd_after, track),
         "products_all": [n for n, _ in PRODUCTS[track]],
         "plan": plan,
+        "afford_action": afford_action,
+        "coverage_pct": coverage_pct,
+        "inputs_supplied": base.get("inputs_supplied"),
+        "missing_answers": missing_answers,
+        "fallback": fallback,
         "immutable_note": ("Age, dependents, family size and credit-history length affect "
                            "your result but are not things we ask you to change."),
     }

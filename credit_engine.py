@@ -293,25 +293,16 @@ def affordability(ans: "Answers", ceiling: float = 0.50):
     computes the PROPOSED (applied) DTI = (existing EMIs + the new loan's EMI) / income, a verdict,
     and the largest loan the income could comfortably service at that ceiling.
     """
-    inc = ans.monthly_income
-    if not inc or inc <= 0 or not ans.loan_amount or not ans.term_months:
+    # Serviceability is a HOUSEHOLD question, so it uses combined income (applicant + co-applicant).
+    # The risk model is untouched — derive() reads monthly_income only and ignores coapplicant_income.
+    inc = (ans.monthly_income or 0.0) + (ans.coapplicant_income or 0.0)
+    if inc <= 0 or not ans.loan_amount or not ans.term_months:
         return None
     rate = _rate_from_score(normalise_bureau_score(ans.credit_score, ans.credit_bureau))
     new_emi = _amortised_installment(ans.loan_amount, rate, int(ans.term_months))
     existing = ans.monthly_emi_existing or 0.0
     proposed_dti = (existing + new_emi) / inc
-    # Verdict is purely RELATIVE to the DTI level the USER supplies — we make no assumption about
-    # what any lender allows. (This affordability arithmetic is entirely separate from the ML risk
-    # model, which is unchanged; it neither feeds the model nor alters the risk score.)
-    if proposed_dti <= ceiling:
-        verdict = "within"
-        note = (f"Your proposed debt-to-income of {proposed_dti*100:.0f}% is within the "
-                f"{ceiling*100:.0f}% level you set.")
-    else:
-        verdict = "exceeds"
-        note = (f"Your proposed debt-to-income of {proposed_dti*100:.0f}% exceeds the "
-                f"{ceiling*100:.0f}% level you set — the EMIs would take more of your income than "
-                "that. A smaller loan amount or a longer term would bring it within.")
+    existing_dti = existing / inc
     # largest loan whose EMI keeps total DTI at/under the ceiling
     max_new_emi = max(0.0, ceiling * inc - existing)
     r = rate / 12.0 / 100.0
@@ -322,17 +313,38 @@ def affordability(ans: "Answers", ceiling: float = 0.50):
         max_loan = max_new_emi * (1 - (1 + r) ** (-n)) / r
     else:
         max_loan = max_new_emi * n
-    return {"new_emi": new_emi, "existing_emi": existing, "existing_dti": existing / inc,
+    # no_capacity = existing EMIs already use up (or exceed) the chosen DTI level -> no room at all.
+    no_capacity = max_new_emi <= 0
+    # Verdict is purely RELATIVE to the DTI level the USER supplies — we make no assumption about
+    # what any lender allows. (This affordability arithmetic is entirely separate from the ML risk
+    # model, which is unchanged; it neither feeds the model nor alters the risk score.)
+    if proposed_dti <= ceiling:
+        verdict = "within"
+        note = (f"Your proposed debt-to-income of {proposed_dti*100:.0f}% is within the "
+                f"{ceiling*100:.0f}% level you set.")
+    elif no_capacity:
+        verdict = "exceeds"
+        note = (f"Your existing EMIs alone are {existing_dti*100:.0f}% of income — already at or "
+                f"beyond the {ceiling*100:.0f}% level you set, so there is no room for a new loan on "
+                "this income. Adding a co-applicant's income, or clearing some existing EMIs, would "
+                "create capacity.")
+    else:
+        verdict = "exceeds"
+        note = (f"Your proposed debt-to-income of {proposed_dti*100:.0f}% exceeds the "
+                f"{ceiling*100:.0f}% level you set — the EMIs would take more of your income than "
+                "that. A smaller loan amount or a longer term would bring it within.")
+    return {"new_emi": new_emi, "existing_emi": existing, "existing_dti": existing_dti,
             "proposed_dti": proposed_dti, "verdict": verdict, "note": note,
-            "max_serviceable_loan": max_loan, "ceiling": ceiling, "rate_pct": rate}
+            "no_capacity": no_capacity, "max_serviceable_loan": max_loan,
+            "ceiling": ceiling, "rate_pct": rate}
 
 
 def affordability_table(ans: "Answers", ceilings=(0.50, 0.75, 1.00, 1.25, 1.50)):
     """The loan an income could service across a RANGE of debt-to-income levels — a neutral
     reference (we do not assume which level any lender applies). A higher level simply means the
     EMIs take a larger share of income; levels above 100% require EMIs beyond a single income."""
-    inc = ans.monthly_income
-    if not inc or inc <= 0 or not ans.term_months:
+    inc = (ans.monthly_income or 0.0) + (ans.coapplicant_income or 0.0)   # combined household income
+    if inc <= 0 or not ans.term_months:
         return None
     rate = _rate_from_score(normalise_bureau_score(ans.credit_score, ans.credit_bureau))
     existing = ans.monthly_emi_existing or 0.0

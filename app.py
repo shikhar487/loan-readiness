@@ -213,13 +213,40 @@ with a2:
     monthly_emi = st.number_input("Total monthly EMIs you already pay (₹)", 0, 10_000_000, 15_000, 1_000)
     term_months = st.selectbox("Repayment period (months)",
                                [12, 24, 36, 48, 60, 84, 120, 180, 240, 300], index=2)
-if monthly_income > 0:
-    chip(f"Existing debt-to-income derived: **{monthly_emi/monthly_income*100:.1f}%** — "
-         "your current EMIs over income (you never enter this yourself)")
+    coapplicant_income = st.number_input(
+        "Co-applicant's monthly income (₹, optional)", 0, 10_000_000, 0, 1_000,
+        help="Applying with a co-applicant (spouse / parent / partner)? Add their monthly income. "
+             "It is used only for the affordability (debt-servicing) check — it does NOT change the "
+             "credit-risk model, which assesses you on your own profile.")
+
+# Combined household income powers the affordability / DTI serviceability view (never the risk model).
+combined_income = monthly_income + coapplicant_income
+_inc_basis = combined_income if coapplicant_income > 0 else monthly_income
+
+# --- Upfront guardrail: existing debt already meets/exceeds income (existing DTI >= 100%) ----------
+if monthly_emi > 0 and _inc_basis > 0 and monthly_emi >= _inc_basis:
+    if coapplicant_income > 0:
+        st.error(
+            f"**Your existing EMIs (₹{monthly_emi:,.0f}/mo) still meet or exceed your combined "
+            f"household income (₹{_inc_basis:,.0f}/mo).** Your current debt is already not serviceable, "
+            "so a fresh loan cannot be added on top. You would need to reduce existing EMIs, or add "
+            "more income, before applying for a new loan.", icon="🚫")
+    else:
+        st.error(
+            f"**Your existing EMIs (₹{monthly_emi:,.0f}/mo) already meet or exceed your monthly income "
+            f"(₹{monthly_income:,.0f}/mo)** — your current debt is more than your income can service, so "
+            "a fresh loan cannot be added on top. **Add a co-applicant and enter their monthly income "
+            "above** (or reduce your existing EMIs) before applying for a new loan.", icon="🚫")
+
+if _inc_basis > 0:
+    _basis_lbl = "combined household income" if coapplicant_income > 0 else "income"
+    _extra = f"; combined income ₹{_inc_basis:,.0f}/mo" if coapplicant_income > 0 else ""
+    chip(f"Existing debt-to-income derived: **{monthly_emi/_inc_basis*100:.1f}%** — "
+         f"your current EMIs over {_basis_lbl} (you never enter this yourself){_extra}")
     if loan_amount and term_months:
         from credit_engine import _amortised_installment, _rate_from_score
         _new_emi = _amortised_installment(loan_amount, _rate_from_score(None), term_months)
-        _prop_dti = (monthly_emi + _new_emi) / monthly_income * 100
+        _prop_dti = (monthly_emi + _new_emi) / _inc_basis * 100
         chip(f"Proposed debt-to-income after this loan (approx.): **{_prop_dti:.0f}%** — existing "
              f"EMIs plus this loan's estimated EMI of ~₹{_new_emi:,.0f}/mo. Refined below once you "
              "add your credit score.")
@@ -520,6 +547,7 @@ go = st.button("Check my loan readiness", type="primary", use_container_width=Tr
 if go:
     ans = Answers(
         product=product, monthly_income=monthly_income or None,
+        coapplicant_income=coapplicant_income or None,
         monthly_emi_existing=monthly_emi, credit_score=credit_score,
         credit_bureau=credit_bureau, additional_score=additional_score,
         additional_score_type=additional_score_type,
@@ -597,6 +625,8 @@ if go:
     # this loan's EMI, over income) and the loan serviceable at a DTI level the CUSTOMER chooses.
     # We make no assumption about what any lender allows.
     from credit_engine import affordability, affordability_table
+    target_pct = 50   # default DTI level; the slider below overrides it when shown
+    aff = None
     if monthly_income and loan_amount and term_months:
         st.divider()
         st.markdown("###### Can your income service this loan? *(a separate affordability check — "
@@ -657,13 +687,53 @@ if go:
     # ==================================================================
     from improvement_engine import analyse
     from report_pdf import build_report_pdf
-    plan_res = analyse(ans, router)
+    plan_res = analyse(ans, router, afford=aff)
 
     section("8", "How to improve your loan readiness")
     st.markdown(
         "Ranked by how much each change lifts your **Readiness Score** — and every impact is "
         "**causally corrected**, so we only push changes that genuinely move the needle "
         "(not ones the raw model overstates). We only suggest things you can actually change.")
+
+    # Affordability-driven headline — promoted ABOVE the behavioural plan. For an out-of-capacity
+    # request this is THE recommendation, and one the risk model cannot produce (it saturates on
+    # amounts outside its training range). Pure arithmetic on the customer's own figures.
+    _aa = plan_res.get("afford_action")
+    if _aa and _aa.get("no_capacity"):
+        st.error(
+            f"**Your existing EMIs already use up your repayment capacity.** At the "
+            f"{_aa['ceiling_pct']}% debt-to-income level you chose, your current EMIs alone are about "
+            f"**{_aa['existing_dti_pct']}%** of income — leaving no room to add a new loan on this "
+            "income. To create capacity:", icon="🚫")
+        st.markdown(
+            "- **Add a co-applicant and include their monthly income** — this raises the household "
+            "income the loan is serviced from, or\n"
+            "- **Clear or reduce some existing EMIs** first, or\n"
+            "- **Choose a longer repayment term** so each EMI is smaller.")
+        st.caption("This is an affordability (debt-servicing) check — separate from the credit-risk "
+                   "score above. It uses only your own figures and the DTI level you set, and does "
+                   "not change the risk model.")
+    elif _aa:
+        st.error(
+            f"**This loan is larger than your stated income can comfortably service.** At the "
+            f"{_aa['ceiling_pct']}% debt-to-income level you chose, the EMI on "
+            f"₹{_aa['requested']:,.0f} would put you at about **{_aa['proposed_dti_pct']}%** DTI. "
+            f"The most this income could service over the same term is roughly "
+            f"**₹{_aa['max_serviceable_loan']:,.0f}** — about ₹{_aa['shortfall']:,.0f} less than "
+            f"requested. Strongest options:", icon="🎯")
+        st.markdown(
+            f"- **Borrow up to about ₹{_aa['max_serviceable_loan']:,.0f}** over this term, or\n"
+            f"- **Choose a longer repayment term** to lower the monthly EMI, or\n"
+            f"- **Add a co-applicant's income**, or raise income before applying.")
+        st.caption("This is an affordability (debt-servicing) check — separate from the credit-risk "
+                   "score above. It uses only your own figures and the DTI level you set, and does "
+                   "not change the risk model.")
+
+    # Coverage indicator — reframes 'not sure' answers from a silent failure into a clear signal.
+    if plan_res.get("inputs_supplied"):
+        st.caption(f"Recommendations based on {plan_res['inputs_supplied']} model inputs "
+                   f"· input coverage ~{plan_res.get('coverage_pct', 0)}%. More complete answers "
+                   f"give more specific advice.")
 
     if plan_res["plan"]:
         pg1, pg2 = st.columns([0.5, 0.5])
@@ -711,8 +781,25 @@ if go:
             } for p in plan_res["plan"]])
             st.dataframe(tbl, hide_index=True, use_container_width=True)
     else:
-        st.info("From the details you provided, we didn't find high-impact changes to suggest. "
-                "Answering more of the optional questions may reveal opportunities.")
+        fb = plan_res.get("fallback") or {"kind": "generic"}
+        if fb["kind"] == "affordability":
+            st.info("The main thing to address here is the **loan size versus your income** "
+                    "(shown above). Once the amount is within what your income can service, "
+                    "re-run to surface behavioural improvements too.", icon="ℹ️")
+        elif fb["kind"] == "coverage":
+            st.warning("**We can't suggest specific improvements yet — a few key answers are "
+                       "missing.** You left these as 'not sure' or skipped them, and each one "
+                       "unlocks part of the plan:", icon="📝")
+            for m in fb.get("missing", []):
+                st.markdown(f"- {m}")
+            st.caption("Add these and re-run — the more complete your answers, the more specific "
+                       "the recommendations become.")
+        elif fb["kind"] == "strong":
+            st.success("On the details you provided, we didn't find a material weakness to improve "
+                       "— your profile already reads as low-risk on what we can see.", icon="✅")
+        else:
+            st.info("From the details you provided, we didn't find high-impact changes to suggest. "
+                    "Answering more of the optional questions may reveal opportunities.")
 
     pdf_bytes = build_report_pdf(ans, plan_res, applicant_name="Applicant",
                                  product_label=allp[product])
