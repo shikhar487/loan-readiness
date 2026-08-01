@@ -261,6 +261,32 @@ st.markdown(
     f'</div>', unsafe_allow_html=True)
 
 # ======================================================================
+# 1b · New to credit? — asked for EVERY product, right after the loan type.
+# If "Yes", every question about existing loans / credit cards / credit score / past
+# payments is locked as "none" further down; only income, the requested loan and (for
+# secured) the asset details are then taken.
+# ======================================================================
+NEW_YES = "Yes — I am completely new to credit"
+NEW_NO  = "No — I have some credit history"
+_required.append(("newcredit", "Whether you are new to credit"))
+with st.container(border=True):
+    st.markdown("### 🆕 Are you new to credit?")
+    st.markdown(
+        '<div style="font-size:1.05rem;line-height:1.5;color:var(--ink);">'
+        'Choose <b>Yes</b> only if you have <b style="color:#a53a34;">no loan history whatsoever — '
+        'no loans of any kind, and not even a credit card</b> (whether currently held or closed in '
+        'the past). If you have ever held <i>any</i> loan or credit card, choose <b>No</b>.</div>',
+        unsafe_allow_html=True)
+    _ntc = st.radio("newcredit", [NEW_NO, NEW_YES], index=None, key="tri_newcredit",
+                    label_visibility="collapsed")
+new_to_credit = (_ntc == NEW_YES)
+if new_to_credit:
+    st.success("**New to credit** — every question below about existing loans, credit cards, credit "
+               "score and past payments is now locked as 'none'. Just tell us your income, the loan "
+               "you want, and (for a secured loan) the asset details. We'll assess you with the "
+               "model built for applicants with no credit file.", icon="🆕")
+
+# ======================================================================
 # 2 · Core financials — always known, so asked directly
 # ======================================================================
 section("2", "Your income, age and the loan you want",
@@ -272,10 +298,16 @@ with a1:
     age = st.number_input("Your age", 18, 100, 35,
                           help="Everyone knows their age, so there is no 'not sure' option here.")
 with a2:
-    monthly_emi = st.number_input("Total monthly EMIs you already pay (all loans) (₹)",
-                                  0, 10_000_000, 15_000, 1_000,
-                                  help="Add up the EMIs on ALL your current loans — home, vehicle, "
-                                       "personal, consumer-durable, education, and card conversions.")
+    if new_to_credit:
+        monthly_emi = 0
+        st.number_input("Total monthly EMIs you already pay (all loans) (₹)", 0, 10_000_000, 0,
+                        disabled=True,
+                        help="Locked to 0 — you selected new to credit (no existing loans).")
+    else:
+        monthly_emi = st.number_input("Total monthly EMIs you already pay (all loans) (₹)",
+                                      0, 10_000_000, 15_000, 1_000,
+                                      help="Add up the EMIs on ALL your current loans — home, vehicle, "
+                                           "personal, consumer-durable, education, and card conversions.")
     _tenors = tenor_options(product)
     term_months = st.selectbox(
         "Repayment period", _tenors,
@@ -377,73 +409,75 @@ sub = ("Your credit score is a key, reliable input that lenders trust — please
        if track == "unsecured" else
        "Your credit score is essential for a secured loan assessment — please "
        "enter it. Without it the estimate is far less reliable.")
-section("3", "Credit score", sub)
-
-EXACT, BAND, NOSCORE = "I know my exact score", "I know the approximate range", "I don't have a credit score"
-_required.append(("score", "Credit score"))
 credit_score = credit_bureau = None
-with st.container(border=True):
-    st.markdown("**Do you know your credit score?**")
-    score_state = st.radio("Availability", [EXACT, BAND, NOSCORE, UNSURE], index=None,
-                           horizontal=True, key="tri_score", label_visibility="collapsed")
-    if score_state in (EXACT, BAND):
-        b1, b2 = st.columns(2)
-        # Only FICO is genuinely in the training data (LendingClub). Any other bureau
-        # score is accepted and RESCALED by its published range onto the FICO 300-850
-        # scale the model was trained on. We therefore expose two honest choices — the
-        # trained scale, or "another bureau" (all of CIBIL/Experian/Equifax/CRIF share
-        # the 300-900 range) — rather than implying the model was trained on each bureau.
-        BUREAU_CHOICES = {
-            "FICO (300–850) — the model's trained scale": "FICO",
-            "Another bureau — CIBIL / Experian / Equifax / CRIF (300–900)*": "CIBIL",
-        }
-        label = b1.selectbox("Which score do you have?", list(BUREAU_CHOICES))
-        credit_bureau = BUREAU_CHOICES[label]
-        lo, hi = BUREAU_RANGES[credit_bureau]
-        if score_state == EXACT:
-            credit_score = b2.number_input("Your score", lo, hi, min(750, hi))
-        else:
-            bands, v = [], lo
-            while v < hi:
-                top = min(v + 40, hi)
-                bands.append((v, top))
-                v = top
-            pick = b2.selectbox("Approximate range", bands,
-                                format_func=lambda t: f"{t[0]} – {t[1]}",
-                                index=len(bands) - 4 if len(bands) > 4 else 0)
-            credit_score = (pick[0] + pick[1]) / 2
-            st.caption(f"We'll use the midpoint of your band ({credit_score:.0f}). "
-                       "A band is far better than leaving it blank.")
-        if credit_bureau != "FICO":
-            st.caption("\\* Rescaled to the model's trained FICO range (300–850) by the "
-                       "bureau's published min–max. This assumes rank-equivalence across "
-                       "bureaus — a documented approximation, since the model is trained on FICO.")
-    elif score_state == NOSCORE:
-        st.caption("New to credit — we'll use the no-score model built for exactly this case.")
-    elif score_state == UNSURE:
-        st.caption("We'll use the no-score model and widen the confidence band.")
+additional_score = additional_score_type = None
+if new_to_credit:
+    section("3", "Credit score", "Skipped — you told us you're new to credit.")
+    with st.container(border=True):
+        st.caption("🔒 Locked — new to credit means no credit score yet. We'll use the no-score "
+                   "model built for exactly this case.")
+else:
+    section("3", "Credit score", sub)
+    EXACT, BAND, NOSCORE = "I know my exact score", "I know the approximate range", "I don't have a credit score"
+    _required.append(("score", "Credit score"))
+    with st.container(border=True):
+        st.markdown("**Do you know your credit score?**")
+        score_state = st.radio("Availability", [EXACT, BAND, NOSCORE, UNSURE], index=None,
+                               horizontal=True, key="tri_score", label_visibility="collapsed")
+        if score_state in (EXACT, BAND):
+            b1, b2 = st.columns(2)
+            # Only FICO is genuinely in the training data (LendingClub). Any other bureau
+            # score is accepted and RESCALED by its published range onto the FICO 300-850
+            # scale the model was trained on.
+            BUREAU_CHOICES = {
+                "FICO (300–850) — the model's trained scale": "FICO",
+                "Another bureau — CIBIL / Experian / Equifax / CRIF (300–900)*": "CIBIL",
+            }
+            label = b1.selectbox("Which score do you have?", list(BUREAU_CHOICES))
+            credit_bureau = BUREAU_CHOICES[label]
+            lo, hi = BUREAU_RANGES[credit_bureau]
+            if score_state == EXACT:
+                credit_score = b2.number_input("Your score", lo, hi, min(750, hi))
+            else:
+                bands, v = [], lo
+                while v < hi:
+                    top = min(v + 40, hi)
+                    bands.append((v, top))
+                    v = top
+                pick = b2.selectbox("Approximate range", bands,
+                                    format_func=lambda t: f"{t[0]} – {t[1]}",
+                                    index=len(bands) - 4 if len(bands) > 4 else 0)
+                credit_score = (pick[0] + pick[1]) / 2
+                st.caption(f"We'll use the midpoint of your band ({credit_score:.0f}). "
+                           "A band is far better than leaving it blank.")
+            if credit_bureau != "FICO":
+                st.caption("\\* Rescaled to the model's trained FICO range (300–850) by the "
+                           "bureau's published min–max. This assumes rank-equivalence across "
+                           "bureaus — a documented approximation, since the model is trained on FICO.")
+        elif score_state == NOSCORE:
+            st.caption("New to credit — we'll use the no-score model built for exactly this case.")
+        elif score_state == UNSURE:
+            st.caption("We'll use the no-score model and widen the confidence band.")
 
-# --- additional lender score: pick the TYPE, or say it's unavailable ----
-NOT_AVAILABLE = "Not available with me"
-SCORE_TYPES = ["Lender's own internal score", "Alternative-data / fintech score",
-               "Account-aggregator based score", "Telecom or utility score",
-               "Other lender score", NOT_AVAILABLE]
-_required.append(("extra_type", "Additional lender score"))
-additional_score = None
-additional_score_type = None
-with st.container(border=True):
-    st.markdown("**Any additional score a lender has given you?**")
-    st.caption("These are lender-specific and not published by any bureau — the dataset "
-               "behind this model keeps them anonymous, so we cannot name them.")
-    additional_score_type = st.selectbox(
-        "Type of score", SCORE_TYPES, index=None, placeholder="Select one…",
-        key="tri_extra_type", label_visibility="collapsed")
-    if additional_score_type and additional_score_type != NOT_AVAILABLE:
-        additional_score = st.number_input(
-            "Score value", 0.0, 900.0, 0.0, 1.0,
-            help="Enter on whatever scale the lender gave you (0–1 or 300–900).")
-        if additional_score == 0.0:
-            additional_score = None
+    # --- additional lender score: pick the TYPE, or say it's unavailable ----
+    NOT_AVAILABLE = "Not available with me"
+    SCORE_TYPES = ["Lender's own internal score", "Alternative-data / fintech score",
+                   "Account-aggregator based score", "Telecom or utility score",
+                   "Other lender score", NOT_AVAILABLE]
+    _required.append(("extra_type", "Additional lender score"))
+    with st.container(border=True):
+        st.markdown("**Any additional score a lender has given you?**")
+        st.caption("These are lender-specific and not published by any bureau — the dataset "
+                   "behind this model keeps them anonymous, so we cannot name them.")
+        additional_score_type = st.selectbox(
+            "Type of score", SCORE_TYPES, index=None, placeholder="Select one…",
+            key="tri_extra_type", label_visibility="collapsed")
+        if additional_score_type and additional_score_type != NOT_AVAILABLE:
+            additional_score = st.number_input(
+                "Score value", 0.0, 900.0, 0.0, 1.0,
+                help="Enter on whatever scale the lender gave you (0–1 or 300–900).")
+            if additional_score == 0.0:
+                additional_score = None
 
 # ======================================================================
 # 4 · Track-specific
@@ -462,25 +496,16 @@ if track == "unsecured":
             'If you have no credit cards at all, choose "I don\'t have any" — that is '
             "different from not knowing the number.")
 
-    # Item 19 — new-to-credit gate. If ticked, all credit-history questions are pre-set to
-    # "none" and skipped, and we assess with the no-credit-file model. Only the questions that
-    # still apply (housing, purpose) are asked.
-    new_to_credit = st.checkbox(
-        "I'm new to credit — I have no credit cards, no loans, and no credit history yet",
-        key="new_to_credit",
-        help="Tick this if you've never held a credit card or loan. We'll skip the credit-history "
-             "questions and assess you with the model built for applicants with no credit file.")
-
+    # New-to-credit is decided once, up top (item 19). When set, all credit-history questions
+    # are pre-set to "none" and skipped; only housing and purpose are asked here.
     if new_to_credit:
         card_balance = card_limit = 0.0
         num_credit_lines = enquiries_6m = new_accounts_24m = 0
         missed_payment_2y = has_default_record = False
         first_credit_year = None
-        st.info("🆕 **New to credit** — your credit-card and history answers are set to 'none' and "
-                "locked below. Just tell us your housing situation and the loan's purpose.", icon="🆕")
         with st.container(border=True):
-            st.caption("Locked (new to credit): no credit cards · no loans · no missed payments · "
-                       "no defaults · no credit history yet.")
+            st.caption("🔒 Locked (new to credit): no credit cards · no loans · no missed payments · "
+                       "no defaults · no credit history yet. Just tell us your housing and purpose.")
         h1, h2 = st.columns(2)
         with h1:
             housing, _ = tri_select("Your housing situation", "house",
@@ -592,8 +617,12 @@ else:
                                          min_value=0, max_value=500_000_000,
                                          value=1_500_000, step=50_000)
         owns_car, _ = tri_yesno("Do you own a car?", "owncar")
-        enquiries_12m, _ = tri_select("Bureau enquiries in the last 12 months", "enq12",
-                                      [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
+        if new_to_credit:
+            enquiries_12m = 0
+            st.caption("🔒 Bureau enquiries locked to 0 — you selected new to credit.")
+        else:
+            enquiries_12m, _ = tri_select("Bureau enquiries in the last 12 months", "enq12",
+                                          [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
     if asset_value:
         chip(f"Loan-to-value derived: **{loan_amount/asset_value*100:.1f}%**")
 
@@ -645,47 +674,55 @@ section("5", "Your existing home &amp; vehicle loans (secured loans)",
         "default at 5.6% versus 8.4% without. We ask about each loan type separately; the follow-up "
         "questions for a loan appear only if you have it.")
 
-# Ask about each secured loan type in its OWN block, so the customer answers specifically for
-# that loan. The per-type answers are combined afterwards into the model's secured-history inputs,
-# so the risk model receives exactly the same values as before (no model change).
-home_owed = home_year = home_missed = None
-veh_owed = veh_year = veh_missed = None
-c_home, c_veh = st.columns(2)
-with c_home:
-    st.markdown("**🏠 Home loan**")
-    has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
-    if has_home_loan is True:
-        home_owed, _ = tri_number("Amount still owed on your home loan (₹)", "homeowed",
-                                  min_value=0, max_value=200_000_000, value=0, step=50_000)
-        home_missed, _ = tri_yesno("Ever missed a payment on your home loan?", "homemiss")
-        home_year, _ = tri_number("Year you took your home loan", "homeyr",
-                                  min_value=1970, max_value=2026, value=2018, zero=None)
-with c_veh:
-    st.markdown("**🚗 Vehicle / car loan**")
-    has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle / car loan?", "hasveh")
-    if has_vehicle_loan is True:
-        veh_owed, _ = tri_number("Amount still owed on your vehicle loan (₹)", "vehowed",
-                                 min_value=0, max_value=50_000_000, value=0, step=25_000)
-        veh_missed, _ = tri_yesno("Ever missed a payment on your vehicle loan?", "vehmiss")
-        veh_year, _ = tri_number("Year you took your vehicle loan", "vehyr",
-                                 min_value=1970, max_value=2026, value=2020, zero=None)
-
-# --- combine per-type answers into the model's secured-history inputs (model contract unchanged) ---
-if (has_home_loan is True) or (has_vehicle_loan is True):
-    _owes = [x for x in (home_owed, veh_owed) if x is not None]
-    secured_outstanding = sum(_owes) if _owes else None
-    _missed = [m for m in (home_missed, veh_missed) if m is not None]
-    secured_ever_missed = (any(_missed) if _missed else None)
-    _years = [y for y in (home_year, veh_year) if y]
-    first_secured_year = min(_years) if _years else None
-    if secured_outstanding and monthly_income:
-        chip(f"Secured debt vs annual income: **{secured_outstanding/(monthly_income*12)*100:.0f}%**")
-else:
+has_home_loan = has_vehicle_loan = None
+if new_to_credit:
+    has_home_loan = has_vehicle_loan = False
     secured_outstanding = 0.0
     secured_ever_missed = False
     first_secured_year = None
-    if (has_home_loan is False) and (has_vehicle_loan is False):
-        st.caption("No home or vehicle loan — recorded as none; the follow-up questions are skipped.")
+    with st.container(border=True):
+        st.caption("🔒 Locked (new to credit): no home or vehicle loan.")
+else:
+    # Ask about each secured loan type in its OWN block, so the customer answers specifically for
+    # that loan. The per-type answers are combined afterwards into the model's secured-history
+    # inputs, so the risk model receives exactly the same values as before (no model change).
+    home_owed = home_year = home_missed = None
+    veh_owed = veh_year = veh_missed = None
+    c_home, c_veh = st.columns(2)
+    with c_home:
+        st.markdown("**🏠 Home loan**")
+        has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
+        if has_home_loan is True:
+            home_owed, _ = tri_number("Amount still owed on your home loan (₹)", "homeowed",
+                                      min_value=0, max_value=200_000_000, value=0, step=50_000)
+            home_missed, _ = tri_yesno("Ever missed a payment on your home loan?", "homemiss")
+            home_year, _ = tri_number("Year you took your home loan", "homeyr",
+                                      min_value=1970, max_value=2026, value=2018, zero=None)
+    with c_veh:
+        st.markdown("**🚗 Vehicle / car loan**")
+        has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle / car loan?", "hasveh")
+        if has_vehicle_loan is True:
+            veh_owed, _ = tri_number("Amount still owed on your vehicle loan (₹)", "vehowed",
+                                     min_value=0, max_value=50_000_000, value=0, step=25_000)
+            veh_missed, _ = tri_yesno("Ever missed a payment on your vehicle loan?", "vehmiss")
+            veh_year, _ = tri_number("Year you took your vehicle loan", "vehyr",
+                                     min_value=1970, max_value=2026, value=2020, zero=None)
+    # combine per-type answers into the model's secured-history inputs (model contract unchanged)
+    if (has_home_loan is True) or (has_vehicle_loan is True):
+        _owes = [x for x in (home_owed, veh_owed) if x is not None]
+        secured_outstanding = sum(_owes) if _owes else None
+        _missed = [m for m in (home_missed, veh_missed) if m is not None]
+        secured_ever_missed = (any(_missed) if _missed else None)
+        _years = [y for y in (home_year, veh_year) if y]
+        first_secured_year = min(_years) if _years else None
+        if secured_outstanding and monthly_income:
+            chip(f"Secured debt vs annual income: **{secured_outstanding/(monthly_income*12)*100:.0f}%**")
+    else:
+        secured_outstanding = 0.0
+        secured_ever_missed = False
+        first_secured_year = None
+        if (has_home_loan is False) and (has_vehicle_loan is False):
+            st.caption("No home or vehicle loan — recorded as none; the follow-up questions are skipped.")
 
 # ======================================================================
 # 6 · Your other loan obligations (item 8 — separate from home/vehicle)
@@ -693,13 +730,18 @@ else:
 section("6", "Your other loan obligations",
         "This is about your <b>instalment loans of every kind put together</b> — not just the "
         "home/vehicle loans above.")
-instalment_outstanding_pct, _ = tri_number(
-    "Across ALL your instalment loans combined — car, personal, consumer-durable and "
-    "education loans (but NOT your home loan) — roughly what % of the total originally "
-    "borrowed is still outstanding?", "ilutil", min_value=0, max_value=100, value=50, step=5,
-    help="A rough estimate is fine. Someone about halfway through repaying these loans would say "
-         "~50%; someone who just took them, ~90%; nearly finished, ~10%. In our data this is a "
-         "strong signal — default rises from 19.6% to 25.0% as this percentage climbs.")
+if new_to_credit:
+    instalment_outstanding_pct = 0
+    with st.container(border=True):
+        st.caption("🔒 Locked (new to credit): no other loan obligations.")
+else:
+    instalment_outstanding_pct, _ = tri_number(
+        "Across ALL your instalment loans combined — car, personal, consumer-durable and "
+        "education loans (but NOT your home loan) — roughly what % of the total originally "
+        "borrowed is still outstanding?", "ilutil", min_value=0, max_value=100, value=50, step=5,
+        help="A rough estimate is fine. Someone about halfway through repaying these loans would say "
+             "~50%; someone who just took them, ~90%; nearly finished, ~10%. In our data this is a "
+             "strong signal — default rises from 19.6% to 25.0% as this percentage climbs.")
 
 # ======================================================================
 # 7 · Causal probing
