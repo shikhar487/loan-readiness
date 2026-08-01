@@ -640,44 +640,58 @@ children — has **4 total members** and **2 dependents**.
 # ======================================================================
 # 5 · Existing secured loans (asked on BOTH tracks — both models use it)
 # ======================================================================
-section("5", "Your existing home or vehicle loans (secured loans)",
-        "Holding a home or vehicle loan is a **positive** signal — in our data, people "
-        "with one default at 5.6% versus 8.4% without. We first ask whether you hold one; the "
-        "follow-up questions appear only if you do.")
-g1, g2 = st.columns(2)
-with g1:
-    has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
-with g2:
-    has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle / car loan?", "hasveh")
+section("5", "Your existing home &amp; vehicle loans (secured loans)",
+        "Holding a home or vehicle loan is a <b>positive</b> signal — in our data, people with one "
+        "default at 5.6% versus 8.4% without. We ask about each loan type separately; the follow-up "
+        "questions for a loan appear only if you have it.")
 
-# Item 3/9 — gate: only ask the secured follow-ups if they actually hold such a loan.
-_has_secured = (has_home_loan is True) or (has_vehicle_loan is True)
-_secured_unknown = (has_home_loan is None) or (has_vehicle_loan is None)
-if _has_secured or _secured_unknown:
-    h1, h2 = st.columns(2)
-    with h1:
-        secured_outstanding, _ = tri_number("Total still owed on your home / vehicle loan(s) (₹)",
-                                            "secout", min_value=0, max_value=200_000_000,
-                                            value=0, step=50_000)
-    with h2:
-        secured_ever_missed, _ = tri_yesno("Have you ever missed a payment on a home or "
-                                           "vehicle loan?", "secmiss")
-    first_secured_year, _ = tri_number("Year you took your first home or vehicle loan", "fsy",
-                                       min_value=1970, max_value=2026, value=2018, zero=None)
+# Ask about each secured loan type in its OWN block, so the customer answers specifically for
+# that loan. The per-type answers are combined afterwards into the model's secured-history inputs,
+# so the risk model receives exactly the same values as before (no model change).
+home_owed = home_year = home_missed = None
+veh_owed = veh_year = veh_missed = None
+c_home, c_veh = st.columns(2)
+with c_home:
+    st.markdown("**🏠 Home loan**")
+    has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
+    if has_home_loan is True:
+        home_owed, _ = tri_number("Amount still owed on your home loan (₹)", "homeowed",
+                                  min_value=0, max_value=200_000_000, value=0, step=50_000)
+        home_missed, _ = tri_yesno("Ever missed a payment on your home loan?", "homemiss")
+        home_year, _ = tri_number("Year you took your home loan", "homeyr",
+                                  min_value=1970, max_value=2026, value=2018, zero=None)
+with c_veh:
+    st.markdown("**🚗 Vehicle / car loan**")
+    has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle / car loan?", "hasveh")
+    if has_vehicle_loan is True:
+        veh_owed, _ = tri_number("Amount still owed on your vehicle loan (₹)", "vehowed",
+                                 min_value=0, max_value=50_000_000, value=0, step=25_000)
+        veh_missed, _ = tri_yesno("Ever missed a payment on your vehicle loan?", "vehmiss")
+        veh_year, _ = tri_number("Year you took your vehicle loan", "vehyr",
+                                 min_value=1970, max_value=2026, value=2020, zero=None)
+
+# --- combine per-type answers into the model's secured-history inputs (model contract unchanged) ---
+if (has_home_loan is True) or (has_vehicle_loan is True):
+    _owes = [x for x in (home_owed, veh_owed) if x is not None]
+    secured_outstanding = sum(_owes) if _owes else None
+    _missed = [m for m in (home_missed, veh_missed) if m is not None]
+    secured_ever_missed = (any(_missed) if _missed else None)
+    _years = [y for y in (home_year, veh_year) if y]
+    first_secured_year = min(_years) if _years else None
     if secured_outstanding and monthly_income:
         chip(f"Secured debt vs annual income: **{secured_outstanding/(monthly_income*12)*100:.0f}%**")
 else:
     secured_outstanding = 0.0
     secured_ever_missed = False
     first_secured_year = None
-    st.caption("No home or vehicle loan — the amount-owed, missed-payment and first-loan-year "
-               "questions are set to 'none' and skipped.")
+    if (has_home_loan is False) and (has_vehicle_loan is False):
+        st.caption("No home or vehicle loan — recorded as none; the follow-up questions are skipped.")
 
 # ======================================================================
 # 6 · Your other loan obligations (item 8 — separate from home/vehicle)
 # ======================================================================
 section("6", "Your other loan obligations",
-        "This is about your **instalment loans of every kind put together** — not just the "
+        "This is about your <b>instalment loans of every kind put together</b> — not just the "
         "home/vehicle loans above.")
 instalment_outstanding_pct, _ = tri_number(
     "Across ALL your instalment loans combined — car, personal, consumer-durable and "
