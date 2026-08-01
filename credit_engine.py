@@ -299,7 +299,7 @@ def affordability(ans: "Answers", ceiling: float = 0.50):
     # The risk model is untouched — derive() reads monthly_income only and ignores coapplicant_income.
     inc = (ans.monthly_income or 0.0) + (ans.coapplicant_income or 0.0)
     rate = ans.expected_roi   # the ONLY rate used — the utility assumes no interest rate of its own
-    if inc <= 0 or not ans.loan_amount or not ans.term_months or not rate or rate <= 0:
+    if inc <= 0 or not ans.loan_amount or not ans.term_months or rate is None or rate < 0:
         return None
     new_emi = _amortised_installment(ans.loan_amount, rate, int(ans.term_months))
     existing = ans.monthly_emi_existing or 0.0
@@ -347,7 +347,7 @@ def affordability_table(ans: "Answers", ceilings=(0.50, 0.75, 1.00, 1.25, 1.50))
     EMIs take a larger share of income; levels above 100% require EMIs beyond a single income."""
     inc = (ans.monthly_income or 0.0) + (ans.coapplicant_income or 0.0)   # combined household income
     rate = ans.expected_roi   # the ONLY rate used — the utility assumes no interest rate of its own
-    if inc <= 0 or not ans.term_months or not rate or rate <= 0:
+    if inc <= 0 or not ans.term_months or rate is None or rate < 0:
         return None
     existing = ans.monthly_emi_existing or 0.0
     r = rate / 12.0 / 100.0

@@ -102,6 +102,68 @@ def chip(text):
     st.markdown(f'<span class="chip">→ {text}</span>', unsafe_allow_html=True)
 
 
+# ----------------------------------------------------------------------
+# Indian number formatting (item 10) + product-specific tenor/ROI (item 1)
+# ----------------------------------------------------------------------
+def inr(n):
+    """Format a number in the Indian grouping system, e.g. 12,34,56,789."""
+    if n is None:
+        return "—"
+    n = int(round(float(n)))
+    neg = n < 0
+    s = str(abs(n))
+    if len(s) > 3:
+        last3, rest, groups = s[-3:], s[:-3], []
+        while len(rest) > 2:
+            groups.insert(0, rest[-2:]); rest = rest[:-2]
+        if rest:
+            groups.insert(0, rest)
+        s = ",".join(groups) + "," + last3
+    return ("-" if neg else "") + "₹" + s
+
+def inr_words(n):
+    """Human words for a rupee amount: thousand / lakh / crore."""
+    if not n:
+        return ""
+    n = float(n)
+    if n >= 1e7:
+        return f"{n/1e7:.2f}".rstrip("0").rstrip(".") + " crore"
+    if n >= 1e5:
+        return f"{n/1e5:.2f}".rstrip("0").rstrip(".") + " lakh"
+    if n >= 1e3:
+        return f"{n/1e3:.0f} thousand"
+    return str(int(n))
+
+# Indicative Indian-market tenors & interest bands per product, from public bank data
+# (SBI / HDFC / ICICI / Axis schedules and RBI aggregates, mid-2020s). The customer PICKS
+# from these; the exact rate/tenor is confirmed with the lender. We assume no single value.
+PRODUCT_TERMS = {
+    "home_loan":             {"tenors": [60,120,180,240,300,360], "roi": (8.0, 11.5),  "t_default": 240},
+    "loan_against_property": {"tenors": [60,120,180,240],         "roi": (9.0, 14.0),  "t_default": 120},
+    "auto_loan":             {"tenors": [12,24,36,48,60,72,84],   "roi": (8.5, 15.0),  "t_default": 60},
+    "personal_loan":         {"tenors": [12,24,36,48,60,72],      "roi": (10.5, 24.0), "t_default": 36},
+    "balance_transfer":      {"tenors": [3,6,9,12,18,24],         "roi": (10.0, 20.0), "t_default": 12},
+    "consumer_durable":      {"tenors": [3,6,9,12,18,24],         "roi": (0.0, 20.0),  "t_default": 12},
+    "education_loan":        {"tenors": [60,84,120,180],          "roi": (8.5, 15.0),  "t_default": 84},
+}
+def _pt(product):
+    return PRODUCT_TERMS.get(product, {"tenors": [12,24,36,48,60,84,120,180,240,300],
+                                       "roi": (8.0, 24.0), "t_default": 36})
+def roi_options(product):
+    lo, hi = _pt(product)["roi"]
+    out, x = [], lo
+    while x <= hi + 1e-9:
+        out.append(round(x, 2)); x += 0.5
+    return out
+def tenor_options(product):
+    return _pt(product)["tenors"]
+def tenor_label(m):
+    if m % 12 == 0:
+        y = m // 12
+        return f"{m} months ({y} yr{'s' if y > 1 else ''})"
+    return f"{m} months"
+
+
 @st.cache_resource
 def get_router():
     reg = load_registry()
@@ -210,24 +272,51 @@ with a1:
     age = st.number_input("Your age", 18, 100, 35,
                           help="Everyone knows their age, so there is no 'not sure' option here.")
 with a2:
-    monthly_emi = st.number_input("Total monthly EMIs you already pay (₹)", 0, 10_000_000, 15_000, 1_000)
-    term_months = st.selectbox("Repayment period (months)",
-                               [12, 24, 36, 48, 60, 84, 120, 180, 240, 300], index=2)
+    monthly_emi = st.number_input("Total monthly EMIs you already pay (all loans) (₹)",
+                                  0, 10_000_000, 15_000, 1_000,
+                                  help="Add up the EMIs on ALL your current loans — home, vehicle, "
+                                       "personal, consumer-durable, education, and card conversions.")
+    _tenors = tenor_options(product)
+    term_months = st.selectbox(
+        "Repayment period", _tenors,
+        index=_tenors.index(_pt(product)["t_default"]) if _pt(product)["t_default"] in _tenors else 0,
+        format_func=tenor_label,
+        help="Tenors Indian lenders typically offer for this product. Confirm the exact tenor with "
+             "your lender.")
     coapplicant_income = st.number_input(
         "Co-applicant's monthly income (₹, optional)", 0, 10_000_000, 0, 1_000,
         help="Applying with a co-applicant (spouse / parent / partner)? Add their monthly income. "
              "It is used only for the affordability (debt-servicing) check — it does NOT change the "
              "credit-risk model, which assesses you on your own profile.")
 
-# Expected interest rate — the ONLY rate the affordability utility uses. The tool assumes no rate of
-# its own; if left at 0, the EMI / proposed-DTI / serviceable-amount figures are simply not estimated.
-expected_roi = st.number_input(
-    "Expected interest rate on this loan (% per year)", 0.0, 100.0, 0.0, 0.25, format="%.2f",
-    help="Enter the rate you expect, or that your lender has quoted. This is the ONLY interest rate "
-         "the affordability estimates use — the tool assumes no rate of its own.")
-st.caption("The affordability figures below use the interest rate you enter here — the model does not "
-           "assume any rate. It is a good idea to confirm your applicable ROI with the lender to get "
-           "the most accurate results from this utility.")
+# Indian-format echo of the large amounts (item 10) — easier to read than a raw number box.
+_echo = []
+if loan_amount:     _echo.append(f"Loan **{inr(loan_amount)}** ({inr_words(loan_amount)})")
+if monthly_income:  _echo.append(f"income **{inr(monthly_income)}**/mo")
+if monthly_emi:     _echo.append(f"existing EMIs **{inr(monthly_emi)}**/mo")
+if _echo:
+    st.caption("You entered: " + " · ".join(_echo))
+
+# Expected interest rate — a product-specific DROPDOWN of indicative Indian-bank rates (item 1).
+# It is the ONLY rate the affordability utility uses; the tool assumes no rate of its own.
+_roi_opts = roi_options(product)
+expected_roi = st.selectbox(
+    "Expected interest rate (% per year)", _roi_opts, index=None,
+    placeholder="Select the rate you expect / were quoted",
+    format_func=lambda r: f"{r:.1f}%",
+    help="Choose from the range Indian lenders typically offer for this product. This is the ONLY "
+         "rate the affordability estimates use — the tool assumes no rate of its own.")
+st.caption("These are indicative ranges from public Indian-bank data — pick the rate you expect or "
+           "were quoted. The affordability figures use only the value you select; confirm your exact "
+           "ROI with the lender for the most accurate results.")
+
+# --- Live EMI on the proposed loan (item 2) — shown up front as soon as amount + rate + tenor known.
+if loan_amount and term_months and expected_roi is not None:
+    from credit_engine import _amortised_installment as _emi_fn
+    _emi_top = _emi_fn(loan_amount, expected_roi, term_months)
+    st.success(f"💸 **Your estimated EMI on this loan: {inr(_emi_top)}/month** — for "
+               f"{inr(loan_amount)} over {tenor_label(term_months)} at {expected_roi:.1f}% p.a. "
+               "See how it affects your debt-to-income just below.")
 
 # Combined household income powers the affordability / DTI serviceability view (never the risk model).
 combined_income = monthly_income + coapplicant_income
@@ -253,7 +342,7 @@ if _inc_basis > 0:
     _extra = f"; combined income ₹{_inc_basis:,.0f}/mo" if coapplicant_income > 0 else ""
     chip(f"Existing debt-to-income derived: **{monthly_emi/_inc_basis*100:.1f}%** — "
          f"your current EMIs over {_basis_lbl} (you never enter this yourself){_extra}")
-    if loan_amount and term_months and expected_roi and expected_roi > 0:
+    if loan_amount and term_months and expected_roi is not None:
         from credit_engine import _amortised_installment
         _new_emi = _amortised_installment(loan_amount, expected_roi, term_months)
         _existing_dti = monthly_emi / _inc_basis * 100
@@ -372,43 +461,83 @@ if track == "unsecured":
     section("4", "Your credit cards and history",
             'If you have no credit cards at all, choose "I don\'t have any" — that is '
             "different from not knowing the number.")
-    # Note: every tri-state input (card balance/limit incl.) is already a REQUIRED
-    # answer — the tri_number / tri_select / tri_yesno helpers auto-register it. So all
-    # essential inputs on both tracks must be answered, though "I don't have any" / "Not
-    # sure" remain valid, informative answers (they distinguish a true zero from unknown).
-    u1, u2 = st.columns(2)
-    with u1:
-        card_balance, _ = tri_number("Total outstanding on all credit cards (₹)", "cb",
-                                     min_value=0, max_value=10_000_000, value=50_000, step=5_000)
-        num_credit_lines, _ = tri_number("How many cards / active credit lines?", "ncl",
-                                         min_value=0, max_value=50, value=3)
-        enquiries_6m, _ = tri_select("Loans or cards applied for in the last 6 months", "enq6",
-                                     [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
-    with u2:
-        card_limit, _ = tri_number("Total credit limit across all cards (₹)", "cl",
-                                   min_value=0, max_value=10_000_000, value=200_000, step=5_000)
-        new_accounts_24m, _ = tri_select("New credit accounts in the last 24 months", "na24",
+
+    # Item 19 — new-to-credit gate. If ticked, all credit-history questions are pre-set to
+    # "none" and skipped, and we assess with the no-credit-file model. Only the questions that
+    # still apply (housing, purpose) are asked.
+    new_to_credit = st.checkbox(
+        "I'm new to credit — I have no credit cards, no loans, and no credit history yet",
+        key="new_to_credit",
+        help="Tick this if you've never held a credit card or loan. We'll skip the credit-history "
+             "questions and assess you with the model built for applicants with no credit file.")
+
+    if new_to_credit:
+        card_balance = card_limit = 0.0
+        num_credit_lines = enquiries_6m = new_accounts_24m = 0
+        missed_payment_2y = has_default_record = False
+        first_credit_year = None
+        st.info("🆕 **New to credit** — your credit-card and history answers are set to 'none' and "
+                "locked below. Just tell us your housing situation and the loan's purpose.", icon="🆕")
+        with st.container(border=True):
+            st.caption("Locked (new to credit): no credit cards · no loans · no missed payments · "
+                       "no defaults · no credit history yet.")
+        h1, h2 = st.columns(2)
+        with h1:
+            housing, _ = tri_select("Your housing situation", "house",
+                                    ["own_outright", "paying_home_loan", "rented", "with_family"],
+                                    lambda x: x.replace("_", " ").title())
+        with h2:
+            loan_purpose, _ = tri_select(
+                "Purpose of the loan", "purpose", list(UI_PURPOSE_LABELS),
+                lambda x: UI_PURPOSE_LABELS[x])
+    else:
+        # Item 3/9 — do you use credit cards? "No" pre-fills and skips the card questions.
+        _required.append(("hascards", "Whether you use credit cards"))
+        with st.container(border=True):
+            st.markdown("**Do you currently use any credit cards?**")
+            _hc = st.radio("cards", [YES, NO, NOTSURE], index=None, key="tri_hascards",
+                           horizontal=True, label_visibility="collapsed")
+        _no_cards = (_hc == NO)
+        if _no_cards:
+            card_balance = card_limit = 0.0
+            num_credit_lines = 0
+            st.caption("No credit cards — card balance, limit and count are recorded as zero and "
+                       "the follow-up card questions are skipped.")
+        u1, u2 = st.columns(2)
+        with u1:
+            if not _no_cards:
+                card_balance, _ = tri_number("Total outstanding on all credit cards (₹)", "cb",
+                                             min_value=0, max_value=10_000_000, value=50_000, step=5_000)
+                num_credit_lines, _ = tri_number("How many cards / active credit lines?", "ncl",
+                                                 min_value=0, max_value=50, value=3)
+            enquiries_6m, _ = tri_select("Loans or cards applied for in the last 6 months", "enq6",
                                          [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
-        housing, _ = tri_select("Your housing situation", "house",
-                                ["own_outright", "paying_home_loan", "rented", "with_family"],
-                                lambda x: x.replace("_", " ").title())
-    if card_balance and card_limit:
-        chip(f"Card utilisation derived: **{card_balance/card_limit*100:.1f}%**")
-    v1, v2 = st.columns(2)
-    with v1:
-        missed_payment_2y, _ = tri_yesno("Any payment missed by 30+ days in the last 2 years?", "mp2y")
-    with v2:
-        has_default_record, _ = tri_yesno("Any default, write-off or legal/recovery case?", "defrec")
-    w1, w2 = st.columns(2)
-    with w1:
-        first_credit_year, _ = tri_number("Year you took your first loan or card", "fcy",
-                                          min_value=1970, max_value=2026, value=2015, zero=None)
-    with w2:
-        loan_purpose, _ = tri_select(
-            "Purpose of the loan", "purpose", list(UI_PURPOSE_LABELS),
-            lambda x: UI_PURPOSE_LABELS[x],
-            help="Purpose matters a lot: in the training data, business loans default "
-                 "at 29.7% versus 12.2% for weddings.")
+        with u2:
+            if not _no_cards:
+                card_limit, _ = tri_number("Total credit limit across all cards (₹)", "cl",
+                                           min_value=0, max_value=10_000_000, value=200_000, step=5_000)
+            new_accounts_24m, _ = tri_select("New credit accounts in the last 24 months", "na24",
+                                             [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
+            housing, _ = tri_select("Your housing situation", "house",
+                                    ["own_outright", "paying_home_loan", "rented", "with_family"],
+                                    lambda x: x.replace("_", " ").title())
+        if card_balance and card_limit:
+            chip(f"Card utilisation derived: **{card_balance/card_limit*100:.1f}%**")
+        v1, v2 = st.columns(2)
+        with v1:
+            missed_payment_2y, _ = tri_yesno("Any payment missed by 30+ days in the last 2 years?", "mp2y")
+        with v2:
+            has_default_record, _ = tri_yesno("Any default, write-off or legal/recovery case?", "defrec")
+        w1, w2 = st.columns(2)
+        with w1:
+            first_credit_year, _ = tri_number("Year you took your first loan or card", "fcy",
+                                              min_value=1970, max_value=2026, value=2015, zero=None)
+        with w2:
+            loan_purpose, _ = tri_select(
+                "Purpose of the loan", "purpose", list(UI_PURPOSE_LABELS),
+                lambda x: UI_PURPOSE_LABELS[x],
+                help="Purpose matters a lot: in the training data, business loans default "
+                     "at 29.7% versus 12.2% for weddings.")
 else:
     # ---- security structure: buying it, or pledging something already owned? ----
     PURCHASE, MORTGAGE = ("I am buying this asset with the loan (it becomes the security)",
@@ -511,35 +640,57 @@ children — has **4 total members** and **2 dependents**.
 # ======================================================================
 # 5 · Existing secured loans (asked on BOTH tracks — both models use it)
 # ======================================================================
-section("5", "Your existing home or vehicle loans",
+section("5", "Your existing home or vehicle loans (secured loans)",
         "Holding a home or vehicle loan is a **positive** signal — in our data, people "
-        "with one default at 5.6% versus 8.4% without. Having missed payments on one "
-        "counts against you, so we ask both.")
+        "with one default at 5.6% versus 8.4% without. We first ask whether you hold one; the "
+        "follow-up questions appear only if you do.")
 g1, g2 = st.columns(2)
 with g1:
     has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
-    secured_outstanding, _ = tri_number("Total still owed on your home/vehicle loans (₹)",
-                                        "secout", min_value=0, max_value=200_000_000,
-                                        value=0, step=50_000)
 with g2:
-    has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle/car loan?", "hasveh")
-    secured_ever_missed, _ = tri_yesno("Have you ever missed a payment on a home or "
-                                       "vehicle loan?", "secmiss")
-first_secured_year, _ = tri_number("Year you took your first home or vehicle loan", "fsy",
-                                   min_value=1970, max_value=2026, value=2018, zero=None)
-instalment_outstanding_pct, _ = tri_number(
-    "Across your car / personal EMI loans, roughly what % of the original amount is "
-    "still outstanding?", "ilutil", min_value=0, max_value=100, value=50, step=5,
-    help="A rough estimate is fine. Someone halfway through their loans would say ~50%. "
-         "In our data this is a strong signal: default rises from 19.6% to 25.0% as this "
-         "percentage climbs.")
-if secured_outstanding and monthly_income:
-    chip(f"Secured debt vs annual income: **{secured_outstanding/(monthly_income*12)*100:.0f}%**")
+    has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle / car loan?", "hasveh")
+
+# Item 3/9 — gate: only ask the secured follow-ups if they actually hold such a loan.
+_has_secured = (has_home_loan is True) or (has_vehicle_loan is True)
+_secured_unknown = (has_home_loan is None) or (has_vehicle_loan is None)
+if _has_secured or _secured_unknown:
+    h1, h2 = st.columns(2)
+    with h1:
+        secured_outstanding, _ = tri_number("Total still owed on your home / vehicle loan(s) (₹)",
+                                            "secout", min_value=0, max_value=200_000_000,
+                                            value=0, step=50_000)
+    with h2:
+        secured_ever_missed, _ = tri_yesno("Have you ever missed a payment on a home or "
+                                           "vehicle loan?", "secmiss")
+    first_secured_year, _ = tri_number("Year you took your first home or vehicle loan", "fsy",
+                                       min_value=1970, max_value=2026, value=2018, zero=None)
+    if secured_outstanding and monthly_income:
+        chip(f"Secured debt vs annual income: **{secured_outstanding/(monthly_income*12)*100:.0f}%**")
+else:
+    secured_outstanding = 0.0
+    secured_ever_missed = False
+    first_secured_year = None
+    st.caption("No home or vehicle loan — the amount-owed, missed-payment and first-loan-year "
+               "questions are set to 'none' and skipped.")
 
 # ======================================================================
-# 6 · Causal probing
+# 6 · Your other loan obligations (item 8 — separate from home/vehicle)
 # ======================================================================
-section("6", "Recent changes in your situation",
+section("6", "Your other loan obligations",
+        "This is about your **instalment loans of every kind put together** — not just the "
+        "home/vehicle loans above.")
+instalment_outstanding_pct, _ = tri_number(
+    "Across ALL your instalment loans combined — car, personal, consumer-durable and "
+    "education loans (but NOT your home loan) — roughly what % of the total originally "
+    "borrowed is still outstanding?", "ilutil", min_value=0, max_value=100, value=50, step=5,
+    help="A rough estimate is fine. Someone about halfway through repaying these loans would say "
+         "~50%; someone who just took them, ~90%; nearly finished, ~10%. In our data this is a "
+         "strong signal — default rises from 19.6% to 25.0% as this percentage climbs.")
+
+# ======================================================================
+# 7 · Causal probing
+# ======================================================================
+section("7", "Recent changes in your situation",
         "These separate a temporary setback from a lasting one. Our causal analysis showed "
         "these drive genuine risk — not just correlation.")
 d1, d2 = st.columns(2)
@@ -602,48 +753,61 @@ if go:
 
     res = router.predict(ans)
     risk = res["risk"]
-    if risk < 0.10:
-        band, icon, col = "Low risk", "●", "var(--good)"
-    elif risk < 0.25:
-        band, icon, col = "Moderate risk", "▲", "var(--warning)"
-    elif risk < 0.40:
-        band, icon, col = "Elevated risk", "◆", "var(--serious)"
+    track = res["track"]
+    from improvement_engine import approval_chance, readiness_score
+    approval_pct = approval_chance(risk, track) * 100.0
+    readiness = readiness_score(risk, track)
+    # HEADLINE is the chance of getting the loan (approval likelihood). Bands are on approval.
+    if approval_pct >= 75:
+        band, icon, col = "Strong — likely to be approved", "●", "var(--good)"
+    elif approval_pct >= 50:
+        band, icon, col = "Fair — approvable with the right lender", "▲", "var(--warning)"
+    elif approval_pct >= 25:
+        band, icon, col = "Guarded — improvements needed first", "◆", "var(--serious)"
     else:
-        band, icon, col = "High risk", "■", "var(--critical)"
+        band, icon, col = "Low — significant improvements needed", "■", "var(--critical)"
 
-    section("7", "Your risk profile — as a lender would see it")
+    section("7", "Your loan-readiness result")
     r1, r2 = st.columns([0.44, 0.56])
     with r1:
-        pct = min(risk / 0.6, 1.0) * 100
         st.markdown(f"""
 <div class="result">
   <div style="color:var(--ink-muted);font-size:.76rem;text-transform:uppercase;
-       letter-spacing:.06em;font-weight:600;">Estimated default risk</div>
-  <p class="figure">{risk*100:.1f}%</p>
+       letter-spacing:.06em;font-weight:600;">Chance of getting this loan</div>
+  <p class="figure">{approval_pct:.0f}%</p>
   <div class="band" style="color:{col};"><span>{icon}</span><span>{band}</span></div>
-  <div class="track"><div class="fill" style="width:{pct:.1f}%;background:{col};"></div></div>
-  <div class="scale"><span>0%</span><span>30%</span><span>60%+</span></div>
-  <div class="cap">Based on the details you provided for a <b>{res['track']}</b> loan
+  <div class="track"><div class="fill" style="width:{approval_pct:.1f}%;background:{col};"></div></div>
+  <div class="scale"><span>0%</span><span>50%</span><span>100%</span></div>
+  <div class="cap">For a <b>{track}</b> loan
     {"." if res['tier'] >= 1 else ", assessed without a credit score."}</div>
 </div>""", unsafe_allow_html=True)
     with r2:
         t1, t2 = st.columns(2)
-        t1.markdown(f'<div class="tile"><div class="k">Confidence</div>'
-                    f'<div class="v">{res["precision"]}</div>'
-                    f'<div class="s">based on how much you could tell us</div></div>',
+        t1.markdown(f'<div class="tile"><div class="k">Loan-readiness score</div>'
+                    f'<div class="v">{readiness}/100</div>'
+                    f'<div class="s">how strong your profile is</div></div>',
                     unsafe_allow_html=True)
-        t2.markdown(f'<div class="tile"><div class="k">Details provided</div>'
-                    f'<div class="v">{res["inputs_supplied"]}</div>'
-                    f'<div class="s">questions answered</div></div>', unsafe_allow_html=True)
+        t2.markdown(f'<div class="tile"><div class="k">Confidence</div>'
+                    f'<div class="v">{res["precision"]}</div>'
+                    f'<div class="s">based on how much you told us</div></div>',
+                    unsafe_allow_html=True)
         st.write("")
         t3, t4 = st.columns(2)
-        t3.markdown(f'<div class="tile"><div class="k">Risk band</div>'
-                    f'<div class="v" style="font-size:1.15rem;color:{col};">{icon} {band}</div>'
-                    f'<div class="s">where you sit today</div></div>', unsafe_allow_html=True)
+        t3.markdown(f'<div class="tile"><div class="k">Details provided</div>'
+                    f'<div class="v" style="font-size:1.15rem">{res["inputs_supplied"]}</div>'
+                    f'<div class="s">questions answered</div></div>', unsafe_allow_html=True)
         _loan = f"₹{loan_amount:,.0f}" if loan_amount else "—"
         t4.markdown(f'<div class="tile"><div class="k">Loan requested</div>'
                     f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
                     f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
+
+    # Plain disclaimer: how the two headline numbers differ (item 17)
+    st.caption(
+        f"**Chance of getting this loan** ({approval_pct:.0f}%) is our estimate of how likely a lender "
+        f"is to approve you. **Loan-readiness score** ({readiness}/100) is how strong your overall "
+        "profile is — a higher score means a higher chance. They can differ because approval rises "
+        "sharply once your profile crosses a lender's comfort threshold, while the readiness score "
+        "climbs steadily. Both come from the same underlying assessment.")
 
     for note in res["notes"]:
         st.info(note, icon="ℹ️")
@@ -687,10 +851,15 @@ if go:
                 _msg += (f" At the {target_pct}% level, about **₹{aff['max_serviceable_loan']:,.0f}** "
                          "would fit over the same term.")
             _fn(_msg, icon=_ic)
-        elif not (expected_roi and expected_roi > 0):
-            st.info("Enter your **expected interest rate** in section 2 above to see this loan's EMI, "
-                    "your proposed debt-to-income, and the largest amount your income could service. "
-                    "The tool does not assume a rate — it uses only the one you provide.", icon="ℹ️")
+            # Item 6: 100% DTI is a hard CAP, not a target — spell it out.
+            if target_pct >= 100 or aff["proposed_dti"] >= 1.0:
+                st.warning(
+                    "**100% is a hard ceiling, not a target.** At 100% debt-to-income your entire "
+                    "income would go to EMIs with nothing left over — so a higher DTI does not mean a "
+                    "better chance, it means the loan is unaffordable. If your proposed DTI reaches "
+                    "100%, this readiness report applies to your **existing profile**; for the new "
+                    "loan you would need to **add a co-applicant's income, or reduce the amount / "
+                    "extend the tenure** so the proposed DTI stays below 100%.", icon="🧢")
             # reference table: serviceable loan across a range of DTI levels (neutral)
             at = affordability_table(ans)
             if at:
@@ -703,22 +872,30 @@ if go:
                 } for row in at["rows"]])
                 st.table(_df)
                 st.caption("Read off the level you (or your lender) apply. A higher level means the "
-                           "EMIs take a larger share of your income; levels above 100% need EMIs "
-                           "beyond a single income (e.g. a co-applicant). We make no claim about "
-                           "which level a particular lender uses.")
+                           "EMIs take a larger share of your income; **100% means all your income "
+                           "goes to EMIs**, and levels above 100% need income beyond yours alone "
+                           "(e.g. a co-applicant). We make no claim about which level a particular "
+                           "lender uses.")
+        elif expected_roi is None:
+            st.info("Enter your **expected interest rate** in section 2 above to see this loan's EMI, "
+                    "your proposed debt-to-income, and the largest amount your income could service. "
+                    "The tool does not assume a rate — it uses only the one you provide.", icon="ℹ️")
 
     if res["tier"] == 0 and track == "secured":
         st.error("**Precision note** — for a secured loan, not having a credit score reduces "
                  "how precise this estimate can be. Getting your score and re-running will give "
                  "a more reliable assessment.", icon="⚠️")
     elif res["tier"] == 0:
-        st.success("You didn't provide a credit score — for a personal loan that barely changes "
-                   "the result, because your other answers already carry most of the signal.",
-                   icon="✅")
+        st.info("You didn't provide a credit score — for a personal loan its impact is smaller than "
+                "for a secured loan, because your other answers already carry much of the signal. A "
+                "verified score still sharpens the estimate, so add it if you can.", icon="ℹ️")
 
     st.caption("This is an indicative readiness estimate based on the information you provided. "
                "The more complete your answers, the more precise it is — an incomplete form "
                "tends to read as higher risk.")
+    st.caption(f"For transparency: the underlying model estimate is a **{risk*100:.1f}% probability "
+               "of default (PD)** for this profile — the figures above are derived from it. The full "
+               "breakdown is at the end of your downloadable report.")
 
     # ==================================================================
     # 8 · Personalised improvement plan (the essence) + PDF report
@@ -727,10 +904,10 @@ if go:
     from report_pdf import build_report_pdf
     plan_res = analyse(ans, router, afford=aff)
 
-    section("8", "How to improve your loan readiness")
+    section("8", "How to improve your chance of getting the loan")
     st.markdown(
-        "Ranked by how much each change lifts your **Readiness Score** — and every impact is "
-        "**causally corrected**, so we only push changes that genuinely move the needle "
+        "Ranked by how much each change lifts your **chance of getting the loan** — and every impact "
+        "is **causally corrected**, so we only push changes that genuinely move the needle "
         "(not ones the raw model overstates). We only suggest things you can actually change.")
 
     # Affordability-driven headline — promoted ABOVE the behavioural plan. For an out-of-capacity
@@ -774,16 +951,30 @@ if go:
                    f"give more specific advice.")
 
     if plan_res["plan"]:
-        pg1, pg2 = st.columns([0.5, 0.5])
-        pg1.markdown(f'<div class="tile"><div class="k">Readiness now</div>'
-                     f'<div class="v">{plan_res["readiness_now"]}/100</div>'
-                     f'<div class="s">approval likelihood {plan_res["approval_now_pct"]:.0f}%</div></div>',
+        pg1, pg2, pg3 = st.columns(3)
+        pg1.markdown(f'<div class="tile"><div class="k">Chance of loan now</div>'
+                     f'<div class="v">{plan_res["approval_now_pct"]:.0f}%</div>'
+                     f'<div class="s">readiness {plan_res["readiness_now"]}/100</div></div>',
                      unsafe_allow_html=True)
         pg2.markdown(f'<div class="tile"><div class="k">If you act on the top 3</div>'
-                     f'<div class="v" style="color:var(--good);">{plan_res["readiness_after_top3"]}/100</div>'
-                     f'<div class="s">+{plan_res["readiness_after_top3"]-plan_res["readiness_now"]} points · '
-                     f'{len(plan_res["products_now"])} → {len(plan_res["products_after"])} products unlock</div></div>',
+                     f'<div class="v" style="color:var(--good);">{plan_res["approval_after_pct"]:.0f}%</div>'
+                     f'<div class="s">readiness {plan_res["readiness_after_top3"]}/100 · '
+                     f'{len(plan_res["products_now"])} → {len(plan_res["products_after"])} products</div></div>',
                      unsafe_allow_html=True)
+        pg3.markdown(f'<div class="tile"><div class="k">Most you can reach</div>'
+                     f'<div class="v" style="color:var(--accent);">{plan_res["approval_best_pct"]:.0f}%</div>'
+                     f'<div class="s">acting on everything in your control</div></div>',
+                     unsafe_allow_html=True)
+        # Honest ceiling note (items 13/18): what's practical vs out of reach.
+        _bp = plan_res["approval_best_pct"]
+        if _bp < 90:
+            st.caption(f"**Your practical ceiling is about {_bp}%.** That is the most this profile can "
+                       "reach by acting on everything you can realistically change. The rest depends on "
+                       "factors you can't quickly change — mainly your age and how long you've held "
+                       "credit — or is simply beyond typical approval, so we don't promise 100%.")
+        else:
+            st.caption(f"**You can realistically reach about {_bp}%** by acting on the changes below — "
+                       "close to the practical maximum for this profile.")
         st.write("")
         _cc = {"High": "var(--good)", "Medium": "var(--warning)",
                "Low": "var(--critical)", "Model-implied": "var(--ink-muted)"}

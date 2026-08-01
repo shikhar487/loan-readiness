@@ -79,18 +79,35 @@ def _load_sccf():
     return {"unsecured": {}, "secured": {}}
 SCCF = _load_sccf()
 
-# Approval-likelihood mapping: logistic in PD centred on a track "borderline" PD.
-# At PD = centre, approval = 50%; lower PD -> higher approval.
-APPROVAL_CENTRE = {"unsecured": 0.25, "secured": 0.12}
-APPROVAL_STEEP = 12.0
+# ---------------------------------------------------------------------------
+# Score/approval mappings — TRACK-AWARE, recalibrated July 2026.
+#
+# Two separate customer-facing numbers, derived from the same calibrated PD:
+#   * Readiness score (0-100): "how strong is your profile" — a smooth distance
+#     from a track-specific worst-case PD. The denominator is set per track
+#     (~3x the base default rate) so the score is sensitive in the range that
+#     actually occurs on that track (unsecured PDs run ~4-48%, secured ~1-25%).
+#   * Approval likelihood (%): "chance a lender says yes" — a logistic centred on
+#     a track "borderline" PD (approval = 50% there). Steepness is set so a
+#     genuinely low-risk applicant reaches ~99% (the OLD curve capped secured at
+#     ~81%, which read as broken for a near-riskless borrower).
+# ---------------------------------------------------------------------------
+READINESS_PD_MAX = {"unsecured": 0.60, "secured": 0.30}   # PD that scores 0/100
+APPROVAL_PD50    = {"unsecured": 0.30, "secured": 0.14}    # PD where approval = 50%
+
+def _approval_steepness(track: str) -> float:
+    # steepness k such that approval at PD=0 is ~0.99  ->  k = ln(99) / pd50
+    return math.log(99.0) / APPROVAL_PD50[track]
 
 def approval_chance(pd_val: float, track: str) -> float:
-    c = APPROVAL_CENTRE[track]
-    return 1.0 / (1.0 + math.exp(APPROVAL_STEEP * (pd_val - c)))
+    c = APPROVAL_PD50.get(track, 0.30)
+    k = _approval_steepness(track if track in APPROVAL_PD50 else "unsecured")
+    return 1.0 / (1.0 + math.exp(k * (pd_val - c)))
 
-def readiness_score(pd_val: float) -> int:
-    """0-100, aligned to the portal's 0-0.6 risk gauge."""
-    return int(round(100 * (1 - min(pd_val / 0.6, 1.0))))
+def readiness_score(pd_val: float, track: str = "unsecured") -> int:
+    """0-100 profile-strength score, scaled to the track's PD range."""
+    pd_max = READINESS_PD_MAX.get(track, 0.60)
+    return int(round(100 * (1 - min(pd_val / pd_max, 1.0))))
 
 # ---- product eligibility (illustrative PD cutoffs) ------------------------
 PRODUCTS = {
@@ -132,8 +149,8 @@ def _unsecured_levers():
              applicable=lambda a: a.monthly_emi_existing and a.monthly_income and a.monthly_emi_existing > 0.05 * a.monthly_income,
              apply=lambda a: _rep(a, monthly_emi_existing=max(0, a.monthly_emi_existing - 0.10 * a.monthly_income))),
         dict(key="score", track="unsecured", sccf_key="fico_score",
-             title="Improve your credit score by ~50 points",
-             detail="On-time payments and low usage over 6-12 months.",
+             title="Aim to improve your credit score — this has the biggest impact",
+             detail="Work towards a higher score with on-time payments and low usage over 6-12 months.",
              effort="Long", timeframe="6-12 months",
              applicable=lambda a: a.credit_score is not None and a.credit_score < 800,
              apply=lambda a: _rep(a, credit_score=min((a.credit_score or 0) + 50, 900))),
@@ -184,8 +201,8 @@ def _secured_levers():
              applicable=lambda a: a.loan_amount and a.loan_amount > 100000,
              apply=lambda a: _rep(a, loan_amount=a.loan_amount * 0.90)),
         dict(key="score", track="secured", sccf_key="EXT_SOURCE_2",
-             title="Improve your credit score",
-             detail="Build score through on-time payments over 6-12 months.",
+             title="Aim to improve your credit score — this has the biggest impact",
+             detail="Work towards a higher score with on-time payments over 6-12 months.",
              effort="Long", timeframe="6-12 months",
              applicable=lambda a: a.credit_score is not None and a.credit_score < 800,
              apply=lambda a: _rep(a, credit_score=min((a.credit_score or 0) + 50, 900))),
@@ -264,7 +281,7 @@ def analyse(ans: Answers, router: CreditRouter, afford: Optional[Dict[str, Any]]
         causal_drop = raw_drop * sccf if sccf is not None else raw_drop
         # Readiness Score (0-100) is the headline "loan-readiness" metric: it moves
         # proportionally to risk reduction and does not saturate like approval chance.
-        readiness_gain = readiness_score(pd0 - causal_drop) - readiness_score(pd0)
+        readiness_gain = readiness_score(pd0 - causal_drop, track) - readiness_score(pd0, track)
         appr_uplift = approval_chance(pd0 - causal_drop, track) - approval_chance(pd0, track)
         plan.append({
             "key": lv["key"], "title": lv["title"], "detail": lv["detail"],
@@ -297,6 +314,27 @@ def analyse(ans: Answers, router: CreditRouter, afford: Optional[Dict[str, Any]]
     pd_raw_after = router.predict(cum_ans)["risk"] if applied else pd0
     avg_sccf = (sum(sccfs) / len(sccfs)) if sccfs else 1.0
     pd_after = pd0 - (pd0 - pd_raw_after) * min(avg_sccf, 1.0)   # causal-discounted
+
+    # -- best PRACTICAL ceiling: apply EVERY applicable actionable lever (items 13/18) ------
+    # This is the most a customer could reach by acting on things in their control; the gap
+    # from here to 100 is "impractical" — driven by immutable factors (age, history length) or
+    # simply beyond typical approval. Age/gender/dependents are never levers, so they stay fixed.
+    best_ans, best_sccfs = ans, []
+    for lv in levers:
+        try:
+            if lv["applicable"](best_ans):
+                s = _sccf_for(track, lv["sccf_key"])
+                nxt = lv["apply"](best_ans)
+                if router.predict(nxt)["risk"] < router.predict(best_ans)["risk"]:  # only if it helps
+                    best_ans = nxt
+                    best_sccfs.append(s if s is not None else 1.0)
+        except Exception:
+            continue
+    pd_best_raw = router.predict(best_ans)["risk"]
+    best_avg_sccf = (sum(best_sccfs) / len(best_sccfs)) if best_sccfs else 1.0
+    pd_best = pd0 - (pd0 - pd_best_raw) * min(best_avg_sccf, 1.0)
+    approval_best_pct = round(approval_chance(pd_best, track) * 100)
+    readiness_best = readiness_score(pd_best, track)
 
     # -- affordability-driven headline action (arithmetic, NOT the risk model) --------
     # If the requested loan cannot be serviced at the customer's chosen DTI level, that is the
@@ -335,10 +373,13 @@ def analyse(ans: Answers, router: CreditRouter, afford: Optional[Dict[str, Any]]
         "track": track,
         "pd_now": pd0,
         "pd_after_top3": pd_after,
-        "readiness_now": readiness_score(pd0),
-        "readiness_after_top3": readiness_score(pd_after),
+        "pd_best": pd_best,
+        "readiness_now": readiness_score(pd0, track),
+        "readiness_after_top3": readiness_score(pd_after, track),
+        "readiness_best": readiness_best,
         "approval_now_pct": round(approval_chance(pd0, track) * 100, 1),
         "approval_after_pct": round(approval_chance(pd_after, track) * 100, 1),
+        "approval_best_pct": approval_best_pct,
         "products_now": products_qualified(pd0, track),
         "products_after": products_qualified(pd_after, track),
         "products_all": [n for n, _ in PRODUCTS[track]],

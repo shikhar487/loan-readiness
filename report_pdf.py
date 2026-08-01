@@ -109,20 +109,27 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
     S.append(Spacer(1, 4))
     S.append(HRFlowable(width="100%", thickness=1, color=BRAND, spaceAfter=8))
 
-    # ---- snapshot ----
+    # ---- snapshot (lead with the chance of getting the loan) ----
     S.append(_metric_row([
-        ("READINESS SCORE", f"{r_now}/100", f"{band_txt}"),
-        ("APPROVAL LIKELIHOOD", f"{res['approval_now_pct']:.0f}%", "indicative"),
-        ("PRODUCTS YOU QUALIFY FOR", f"{len(res['products_now'])}/{len(res['products_all'])}",
-         "today"),
-        ("IF YOU ACT ON TOP 3", f"{r_aft}/100", f"+{r_aft - r_now} points"),
+        ("CHANCE OF THIS LOAN", f"{res['approval_now_pct']:.0f}%", "chance of approval"),
+        ("LOAN-READINESS SCORE", f"{r_now}/100", f"{band_txt}"),
+        ("IF YOU ACT ON TOP 3", f"{res['approval_after_pct']:.0f}%",
+         f"up from {res['approval_now_pct']:.0f}%"),
+        ("MOST YOU CAN REACH", f"{res.get('approval_best_pct', res['approval_after_pct']):.0f}%",
+         "practical ceiling"),
     ]))
     S.append(Spacer(1, 6))
-    S.append(Paragraph("Your readiness today", SMALL))
+    S.append(Paragraph("Your loan-readiness today", SMALL))
     S.append(_bar(r_now))
     S.append(Spacer(1, 2))
     S.append(Paragraph(f"<font color='#52514e' size=8>0</font>"
                        f"{'&nbsp;' * 60}<font color='#52514e' size=8>100</font>", SMALL))
+    S.append(Spacer(1, 3))
+    S.append(Paragraph("<b>Chance of this loan</b> is how likely a lender is to approve you. "
+                       "<b>Loan-readiness score</b> is how strong your overall profile is; a higher "
+                       "score means a higher chance. They differ because approval rises sharply once "
+                       "your profile crosses a lender's comfort threshold, while readiness climbs "
+                       "steadily. Both come from the same underlying assessment.", SMALL))
 
     # ---- where you stand ----
     S.append(Paragraph("Where you stand today", H2))
@@ -311,6 +318,15 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
         "precise when your answers are complete. Your data is used only to generate this report. "
         "Causal factors for the secured track are indicative where a causal estimate was not "
         "available.", SMALL))
+
+    # ---- technical footnote: the underlying PD, kept at the very bottom (item 16) ----
+    S.append(Spacer(1, 8))
+    S.append(HRFlowable(width="100%", thickness=0.5, color=HAIR, spaceAfter=4))
+    S.append(Paragraph(
+        f"<b>Technical footnote.</b> The model's underlying estimate for this profile is a "
+        f"<b>{res['pd_now']*100:.1f}% probability of default (PD)</b>. The chance-of-loan and "
+        "loan-readiness figures shown above are derived from this PD — a lower PD gives a higher "
+        "chance and a higher readiness score.", SMALL))
 
     doc.build(S)
     buf.seek(0)
