@@ -151,6 +151,7 @@ def _pt(product):
                                        "roi": (8.0, 24.0), "t_default": 36})
 def roi_options(product):
     lo, hi = _pt(product)["roi"]
+    lo = max(0.0, lo - 1.0); hi = hi + 1.0   # ±1% buffer to accommodate frequent market-rate moves
     out, x = [], lo
     while x <= hi + 1e-9:
         out.append(round(x, 2)); x += 0.5
@@ -320,6 +321,15 @@ with a2:
         help="Applying with a co-applicant (spouse / parent / partner)? Add their monthly income. "
              "It is used only for the affordability (debt-servicing) check — it does NOT change the "
              "credit-risk model, which assesses you on your own profile.")
+
+# Change 2 — if a co-applicant income is added, remind the customer to include the co-applicant's
+# EMIs in the total-EMI figure too, so the household income is compared against household obligations.
+if coapplicant_income and coapplicant_income > 0 and not new_to_credit:
+    st.warning(
+        "You've added a co-applicant's income. **Please go back to 'Total monthly EMIs you already "
+        "pay' above and make sure it also includes your co-applicant's existing EMIs.** The "
+        "affordability check compares the household's combined income against the household's "
+        "combined EMIs — including only one side would understate the true debt-to-income.", icon="⚠️")
 
 # Indian-format echo of the large amounts (item 10) — easier to read than a raw number box.
 _echo = []
@@ -541,8 +551,13 @@ if track == "unsecured":
             if not _no_cards:
                 card_limit, _ = tri_number("Total credit limit across all cards (₹)", "cl",
                                            min_value=0, max_value=10_000_000, value=200_000, step=5_000)
-            new_accounts_24m, _ = tri_select("New credit accounts in the last 24 months", "na24",
-                                             [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
+            new_accounts_24m, _ = tri_select(
+                "New loans or credit cards you OPENED in the last 24 months", "na24",
+                [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x),
+                help="Count every brand-new credit account you actually opened in the last 2 years — "
+                     "any new loan (home, auto, personal, consumer-durable, education) or a new credit "
+                     "card. Do NOT count: applications/enquiries that didn't open, accounts opened "
+                     "earlier, or accounts you've since closed.")
             housing, _ = tri_select("Your housing situation", "house",
                                     ["own_outright", "paying_home_loan", "rented", "with_family"],
                                     lambda x: x.replace("_", " ").title())
@@ -857,13 +872,18 @@ if go:
                     f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
                     f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
 
-    # Plain disclaimer: how the two headline numbers differ (item 17)
+    # How each headline number is calculated (change 5) — math origin of each, then model-vs-input.
     st.caption(
-        f"**Chance of getting this loan** ({approval_pct:.0f}%) is our estimate of how likely a lender "
-        f"is to approve you. **Loan-readiness score** ({readiness}/100) is how strong your overall "
-        "profile is — a higher score means a higher chance. They can differ because approval rises "
-        "sharply once your profile crosses a lender's comfort threshold, while the readiness score "
-        "climbs steadily. Both come from the same underlying assessment.")
+        f"**Loan-readiness score = 100 × (1 − your estimated default risk ÷ a fixed risk ceiling)** — "
+        f"your risk scaled linearly onto 0–100 ({readiness}/100 here).")
+    st.caption(
+        f"**Chance of getting this loan = a lender-style S-curve applied to that same risk**, centred "
+        f"on a typical approval cut-off — it climbs steeply as your risk falls below the cut-off "
+        f"({approval_pct:.0f}% here).")
+    st.caption(
+        "Both numbers are produced by our credit-risk model from your profile. The EMI, debt-to-income "
+        "and serviceable-amount figures below are separate arithmetic on only the amount, rate and "
+        "tenor you enter — the model plays no part in those.")
 
     for note in res["notes"]:
         st.info(note, icon="ℹ️")
@@ -1024,13 +1044,18 @@ if go:
         # Honest ceiling note (items 13/18): what's practical vs out of reach.
         _bp = plan_res["approval_best_pct"]
         if _bp < 90:
-            st.caption(f"**Your practical ceiling is about {_bp}%.** That is the most this profile can "
-                       "reach by acting on everything you can realistically change. The rest depends on "
-                       "factors you can't quickly change — mainly your age and how long you've held "
-                       "credit — or is simply beyond typical approval, so we don't promise 100%.")
+            st.caption(
+                f"Based on the details you've shared — and holding constant the factors that can't be "
+                f"altered right now, such as your **age** and **how long you've held credit** — the "
+                f"most this profile reaches on its own is about **{_bp}%**. You can push beyond this: "
+                f"a **higher income of your own** lifts it directly (income is one of the factors our "
+                f"model scores), and **adding a co-applicant or any additional household income** "
+                f"improves the debt-to-income the affordability check works on — both raise how much "
+                f"loan you can comfortably service, and your chance of getting it.")
         else:
-            st.caption(f"**You can realistically reach about {_bp}%** by acting on the changes below — "
-                       "close to the practical maximum for this profile.")
+            st.caption(f"Based on the details you've shared, you can realistically reach about "
+                       f"**{_bp}%** by acting on the changes below — close to the practical maximum for "
+                       "this profile.")
         st.write("")
         _cc = {"High": "var(--good)", "Medium": "var(--warning)",
                "Low": "var(--critical)", "Model-implied": "var(--ink-muted)"}

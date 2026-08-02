@@ -125,11 +125,14 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
     S.append(Paragraph(f"<font color='#52514e' size=8>0</font>"
                        f"{'&nbsp;' * 60}<font color='#52514e' size=8>100</font>", SMALL))
     S.append(Spacer(1, 3))
-    S.append(Paragraph("<b>Chance of this loan</b> is how likely a lender is to approve you. "
-                       "<b>Loan-readiness score</b> is how strong your overall profile is; a higher "
-                       "score means a higher chance. They differ because approval rises sharply once "
-                       "your profile crosses a lender's comfort threshold, while readiness climbs "
-                       "steadily. Both come from the same underlying assessment.", SMALL))
+    S.append(Paragraph("<b>Loan-readiness score = 100 &#215; (1 &#8722; your estimated default risk "
+                       "&#247; a fixed risk ceiling)</b> — your risk scaled linearly onto 0&#8211;100.", SMALL))
+    S.append(Paragraph("<b>Chance of this loan = a lender-style S-curve applied to that same risk</b>, "
+                       "centred on a typical approval cut-off — it climbs steeply as your risk falls "
+                       "below the cut-off.", SMALL))
+    S.append(Paragraph("Both are produced by our credit-risk model from your profile. The EMI, "
+                       "debt-to-income and serviceable-amount figures are separate arithmetic on only "
+                       "the amount, rate and tenor you enter — the model plays no part in those.", SMALL))
 
     # ---- where you stand ----
     S.append(Paragraph("Where you stand today", H2))
