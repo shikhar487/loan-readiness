@@ -341,7 +341,7 @@ def affordability(ans: "Answers", ceiling: float = 0.50):
             "ceiling": ceiling, "rate_pct": rate}
 
 
-def affordability_table(ans: "Answers", ceilings=(0.50, 0.75, 1.00, 1.25, 1.50)):
+def affordability_table(ans: "Answers", ceilings=(0.50, 0.60, 0.70, 0.80, 0.90, 1.00)):
     """The loan an income could service across a RANGE of debt-to-income levels — a neutral
     reference (we do not assume which level any lender applies). A higher level simply means the
     EMIs take a larger share of income; levels above 100% require EMIs beyond a single income."""

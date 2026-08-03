@@ -192,13 +192,13 @@ def build_report_pdf(ans, res, applicant_name="Applicant", product_label=""):
             ("LEFTPADDING", (0, 0), (-1, -1), 7),
         ]))
         S.append(_ft)
-        S.append(Paragraph("Read off the debt-to-income level you (or your lender) apply — we make "
-                 "no claim about which level a particular lender uses. A higher level means the "
-                 "EMIs take a larger share of income; levels above 100% need EMIs beyond a single "
-                 "income (e.g. a co-applicant). All amounts use the interest rate you entered; the "
-                 "tool assumes no rate of its own, so confirm your applicable rate with the lender "
-                 "for the most accurate figures. This affordability arithmetic is separate from, and "
-                 "does not change, the credit-risk assessment above.", SMALL))
+        S.append(Paragraph("A higher level means the EMIs take a larger share of income; "
+                 "<b>100% means your entire income goes to EMIs</b> &mdash; most lenders will not "
+                 "approve that, so aim to keep your proposed debt-to-income comfortably below it. "
+                 "All amounts use the interest rate you entered; the tool assumes no rate of its own, "
+                 "so confirm your applicable rate with the lender for the most accurate figures. This "
+                 "affordability arithmetic is separate from, and does not change, the credit-risk "
+                 "assessment above.", SMALL))
         S.append(Spacer(1, 6))
 
     # ---- action plan (core) ----

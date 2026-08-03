@@ -872,18 +872,21 @@ if go:
                     f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
                     f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
 
-    # How each headline number is calculated (change 5) — math origin of each, then model-vs-input.
-    st.caption(
-        f"**Loan-readiness score = 100 × (1 − your estimated default risk ÷ a fixed risk ceiling)** — "
-        f"your risk scaled linearly onto 0–100 ({readiness}/100 here).")
-    st.caption(
-        f"**Chance of getting this loan = a lender-style S-curve applied to that same risk**, centred "
-        f"on a typical approval cut-off — it climbs steeply as your risk falls below the cut-off "
-        f"({approval_pct:.0f}% here).")
-    st.caption(
-        "Both numbers are produced by our credit-risk model from your profile. The EMI, debt-to-income "
-        "and serviceable-amount figures below are separate arithmetic on only the amount, rate and "
-        "tenor you enter — the model plays no part in those.")
+    # How each headline number is calculated — rendered in a readable box (not faded captions).
+    st.markdown(
+        '<div style="border:1px solid var(--hair);border-radius:10px;padding:13px 16px;'
+        'background:var(--surface);color:var(--ink-2);font-size:.94rem;line-height:1.6;margin-top:4px;">'
+        f'<b style="color:var(--ink);">Loan-readiness score</b> = 100 &times; (1 &minus; your estimated '
+        f'default risk &divide; a fixed risk ceiling) &mdash; your risk scaled linearly onto 0&ndash;100 '
+        f'(<b style="color:var(--ink);">{readiness}/100</b> here).<br>'
+        f'<b style="color:var(--ink);">Chance of getting this loan</b> = a lender-style S-curve applied '
+        f'to that same risk, centred on a typical approval cut-off &mdash; it climbs steeply as your risk '
+        f'falls below the cut-off (<b style="color:var(--ink);">{approval_pct:.0f}%</b> here).<br>'
+        'Both numbers are produced by our credit-risk model from your profile. The EMI, debt-to-income '
+        'and serviceable-amount figures below are separate arithmetic on only the amount, rate and tenor '
+        'you enter &mdash; the model plays no part in those.'
+        '</div>', unsafe_allow_html=True)
+    st.write("")
 
     for note in res["notes"]:
         st.info(note, icon="ℹ️")
@@ -894,21 +897,15 @@ if go:
     # this loan's EMI, over income) and the loan serviceable at a DTI level the CUSTOMER chooses.
     # We make no assumption about what any lender allows.
     from credit_engine import affordability, affordability_table
-    target_pct = 100   # default DTI level (full income); the slider below overrides it when shown
+    target_pct = 100   # affordability is checked against a 100% ceiling (all income to EMIs)
     aff = None
     if monthly_income and loan_amount and term_months:
         st.divider()
         st.markdown("###### Can your income service this loan? *(a separate affordability check — "
                     "the credit-risk assessment above is unchanged)*")
-        target_pct = st.slider("The debt-to-income level you want to check against", 30, 100, 100, 5,
-                             format="%d%%",
-                             help="Set the DTI level you are comfortable with, or that your lender "
-                                  "applies — lenders vary widely, some allow up to 100% of income. We "
-                                  "do not assume any single level; you decide. The serviceable amount "
-                                  "below is computed against whatever you set here.")
-        aff = affordability(ans, ceiling=target_pct / 100.0)
+        aff = affordability(ans, ceiling=1.0)
         if aff:
-            st.caption(f"All figures below are computed at the interest rate you entered — "
+            st.caption(f"Figures below are computed at the interest rate you entered — "
                        f"**{aff['rate_pct']:.2f}% per year**. Confirm your applicable rate with the "
                        "lender for the most accurate results; the model assumes no rate of its own.")
             a1, a2, a3 = st.columns(3)
@@ -917,25 +914,24 @@ if go:
                       help="Your existing EMIs plus this loan's EMI, as a share of income. (The DTI "
                            "the risk model uses above is existing obligations only — this is an "
                            "additional figure, it does not change the model.)")
-            a3.metric(f"Serviceable at {target_pct}%", f"₹{aff['max_serviceable_loan']:,.0f}",
-                      help=f"The largest loan whose EMI keeps your proposed DTI within {target_pct}%, "
-                           "at the interest rate you entered.")
-            _fn = st.success if aff["verdict"] == "within" else st.warning
-            _ic = "✅" if aff["verdict"] == "within" else "⚠️"
-            _msg = aff["note"]
-            if aff["verdict"] == "exceeds" and aff["max_serviceable_loan"] < loan_amount:
-                _msg += (f" At the {target_pct}% level, about **₹{aff['max_serviceable_loan']:,.0f}** "
-                         "would fit over the same term.")
-            _fn(_msg, icon=_ic)
-            # Item 6: 100% DTI is a hard CAP, not a target — spell it out.
-            if target_pct >= 100 or aff["proposed_dti"] >= 1.0:
+            a3.metric("Largest loan under 100% DTI", f"₹{aff['max_serviceable_loan']:,.0f}",
+                      help="The largest loan whose EMI keeps your proposed debt-to-income under 100% "
+                           "(i.e. total EMIs stay within your income), at the interest rate you entered.")
+            # Verdict + the 100%-cap explanation the customer needs.
+            _pdti = aff["proposed_dti"] * 100
+            if _pdti < 100:
+                st.success(
+                    f"Your proposed debt-to-income on this loan is **{_pdti:.0f}%** — within 100%, so "
+                    "your income can service the EMIs (with some left over). Lower is more comfortable.",
+                    icon="✅")
+            else:
                 st.warning(
-                    "**100% is a hard ceiling, not a target.** At 100% debt-to-income your entire "
-                    "income would go to EMIs with nothing left over — so a higher DTI does not mean a "
-                    "better chance, it means the loan is unaffordable. If your proposed DTI reaches "
-                    "100%, this readiness report applies to your **existing profile**; for the new "
-                    "loan you would need to **add a co-applicant's income, or reduce the amount / "
-                    "extend the tenure** so the proposed DTI stays below 100%.", icon="🧢")
+                    f"**At 100% debt-to-income your entire declared income would be spent on EMIs — "
+                    f"which most lenders will not approve.** Your proposed DTI on this loan is "
+                    f"**{_pdti:.0f}%**. Aim for a **loan amount (or longer tenor, or add a co-applicant's "
+                    f"income) that keeps your proposed DTI below 100%** — the largest loan that fits is "
+                    f"about **₹{aff['max_serviceable_loan']:,.0f}** over this term. This affordability "
+                    "check does not change your credit-risk result above.", icon="⚠️")
             # reference table: serviceable loan across a range of DTI levels (neutral)
             at = affordability_table(ans)
             if at:
@@ -947,11 +943,10 @@ if go:
                     "Max loan serviceable": f"₹{row['max_loan']:,.0f}",
                 } for row in at["rows"]])
                 st.table(_df)
-                st.caption("Read off the level you (or your lender) apply. A higher level means the "
-                           "EMIs take a larger share of your income; **100% means all your income "
-                           "goes to EMIs**, and levels above 100% need income beyond yours alone "
-                           "(e.g. a co-applicant). We make no claim about which level a particular "
-                           "lender uses.")
+                st.caption("A higher level means the EMIs take a larger share of your income. "
+                           "**100% means your entire income goes to EMIs** — most lenders will not "
+                           "approve that, so aim to keep your proposed DTI comfortably below it. "
+                           "Lower levels leave more of your income free after the EMI.")
         elif expected_roi is None:
             st.info("Enter your **expected interest rate** in section 2 above to see this loan's EMI, "
                     "your proposed debt-to-income, and the largest amount your income could service. "
