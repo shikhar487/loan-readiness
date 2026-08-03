@@ -102,6 +102,41 @@ def chip(text):
     st.markdown(f'<span class="chip">→ {text}</span>', unsafe_allow_html=True)
 
 
+def takeaway(num, title, sub=""):
+    """A big, bold, catchy section header for the three output sections (replaces 7/8/9)."""
+    st.markdown(
+        f'<div style="margin:28px 0 12px;">'
+        f'<span style="display:inline-block;background:var(--brand);color:#fff;font-size:.72rem;'
+        f'font-weight:700;letter-spacing:.09em;text-transform:uppercase;padding:5px 14px;'
+        f'border-radius:999px;">Takeaway&nbsp;{num}</span>'
+        f'<div style="font-size:1.55rem;font-weight:750;color:var(--ink);margin-top:10px;'
+        f'letter-spacing:-.01em;line-height:1.15;">{title}</div>'
+        + (f'<div style="color:var(--ink-2);font-size:.93rem;margin-top:3px;">{sub}</div>' if sub else '')
+        + '</div>', unsafe_allow_html=True)
+
+
+def chance_curve_chart(risk, track):
+    """Altair chart of chance-of-loan vs default risk, marking the lender cut-off and the applicant."""
+    import altair as alt, pandas as _pd, numpy as _np
+    from improvement_engine import approval_chance, APPROVAL_PD50
+    xs = _np.linspace(0, 0.6, 120)
+    df = _pd.DataFrame({"risk": xs * 100, "chance": [approval_chance(x, track) * 100 for x in xs]})
+    line = alt.Chart(df).mark_line(color="#2a78d6", strokeWidth=3).encode(
+        x=alt.X("risk:Q", title="Your default risk (%)"),
+        y=alt.Y("chance:Q", title="Chance of loan (%)", scale=alt.Scale(domain=[0, 100])))
+    cut = APPROVAL_PD50.get(track, 0.30) * 100
+    rdf = _pd.DataFrame({"x": [cut]})
+    rule = alt.Chart(rdf).mark_rule(color="#e0a200", strokeDash=[5, 4], strokeWidth=2).encode(x="x:Q")
+    rtext = alt.Chart(rdf).mark_text(color="#95620A", align="left", dx=6, fontSize=11, fontWeight="bold").encode(
+        x="x:Q", y=alt.value(12), text=alt.value(f"lender cut-off ≈ {cut:.0f}% risk"))
+    a = approval_chance(risk, track) * 100
+    pdf = _pd.DataFrame({"risk": [risk * 100], "chance": [a]})
+    pt = alt.Chart(pdf).mark_point(size=190, color="#d03b3b", filled=True).encode(x="risk:Q", y="chance:Q")
+    ptext = alt.Chart(pdf).mark_text(color="#d03b3b", dx=9, dy=-9, fontSize=12, fontWeight="bold").encode(
+        x="risk:Q", y="chance:Q", text=alt.value(f"you: {a:.0f}%"))
+    return (line + rule + rtext + pt + ptext).properties(height=235)
+
+
 # ----------------------------------------------------------------------
 # Indian number formatting (item 10) + product-specific tenor/ROI (item 1)
 # ----------------------------------------------------------------------
@@ -838,7 +873,15 @@ if go:
     else:
         band, icon, col = "Low — significant improvements needed", "■", "var(--critical)"
 
-    section("7", "Your loan-readiness result")
+    # Compute affordability + the plan up front so the three output sections can be ordered freely.
+    from credit_engine import affordability, affordability_table
+    from improvement_engine import analyse, READINESS_PD_MAX
+    from report_pdf import build_report_pdf
+    aff = affordability(ans, ceiling=1.0) if (monthly_income and loan_amount and term_months) else None
+    plan_res = analyse(ans, router, afford=aff)
+    pd_max = READINESS_PD_MAX.get(track, 0.60)
+
+    takeaway(1, "Your loan-readiness verdict", "where you stand today — and exactly how we got there")
     r1, r2 = st.columns([0.44, 0.56])
     with r1:
         st.markdown(f"""
@@ -872,85 +915,42 @@ if go:
                     f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
                     f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
 
-    # How each headline number is calculated — rendered in a readable box (not faded captions).
+    # -- how the two headline numbers were calculated, worked for THIS case, + the curve --
+    st.markdown('<div style="font-size:.98rem;font-weight:700;color:var(--ink);margin-top:8px;">'
+                'How we arrived at these two numbers</div>', unsafe_allow_html=True)
+    e1, e2 = st.columns([0.42, 0.58])
+    with e1:
+        st.markdown(
+            '<div style="border:1px solid var(--hair);border-radius:10px;padding:13px 15px;'
+            'background:var(--surface);">'
+            '<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
+            'color:var(--ink-muted);font-weight:700;">Loan-readiness score — the maths for you</div>'
+            f'<div style="font-family:ui-monospace,Consolas,monospace;font-size:.98rem;color:var(--ink);'
+            f'margin-top:9px;line-height:2.0;">100 &times; ( 1 &minus; <b>risk</b> &divide; <b>ceiling</b> )<br>'
+            f'= 100 &times; ( 1 &minus; {risk:.3f} &divide; {pd_max:.2f} )<br>'
+            f'= <b style="color:var(--brand);font-size:1.2rem;">{readiness} / 100</b></div>'
+            f'<div style="color:var(--ink-2);font-size:.82rem;margin-top:9px;line-height:1.45;">'
+            f'Lower risk &rarr; higher score. The ceiling ({pd_max:.2f}) is the risk level that would '
+            f'score 0, set for {track} loans.</div></div>', unsafe_allow_html=True)
+    with e2:
+        st.markdown('<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
+                    'color:var(--ink-muted);font-weight:700;margin-bottom:2px;">'
+                    'Chance of getting this loan — the curve &amp; the cut-off</div>', unsafe_allow_html=True)
+        st.altair_chart(chance_curve_chart(risk, track), use_container_width=True)
+        st.caption(f"The dashed line is a typical lender's approval cut-off; the red dot is you. Your "
+                   f"{risk*100:.1f}% default risk gives a **{approval_pct:.0f}%** chance of the loan.")
     st.markdown(
-        '<div style="border:1px solid var(--hair);border-radius:10px;padding:13px 16px;'
-        'background:var(--surface);color:var(--ink-2);font-size:.94rem;line-height:1.6;margin-top:4px;">'
-        f'<b style="color:var(--ink);">Loan-readiness score</b> = 100 &times; (1 &minus; your estimated '
-        f'default risk &divide; a fixed risk ceiling) &mdash; your risk scaled linearly onto 0&ndash;100 '
-        f'(<b style="color:var(--ink);">{readiness}/100</b> here).<br>'
-        f'<b style="color:var(--ink);">Chance of getting this loan</b> = a lender-style S-curve applied '
-        f'to that same risk, centred on a typical approval cut-off &mdash; it climbs steeply as your risk '
-        f'falls below the cut-off (<b style="color:var(--ink);">{approval_pct:.0f}%</b> here).<br>'
-        'Both numbers are produced by our credit-risk model from your profile. The EMI, debt-to-income '
-        'and serviceable-amount figures below are separate arithmetic on only the amount, rate and tenor '
-        'you enter &mdash; the model plays no part in those.'
-        '</div>', unsafe_allow_html=True)
+        '<div style="border:1px solid var(--hair);border-radius:10px;padding:12px 15px;'
+        'background:var(--surface);color:var(--ink-2);font-size:.93rem;line-height:1.6;margin-top:8px;">'
+        'Both numbers are produced from the details you provided above, which run through an '
+        '<b style="color:var(--ink);">extensive credit-risk model backed by a large database of over '
+        '2 million historical loan records</b>. The EMI and affordability figures in '
+        '<b style="color:var(--ink);">Takeaway&nbsp;3</b> are separate arithmetic on only the amount, '
+        'rate and tenor you enter &mdash; the model plays no part in those.</div>', unsafe_allow_html=True)
     st.write("")
 
     for note in res["notes"]:
         st.info(note, icon="ℹ️")
-
-    # --- Affordability of the applied loan — a SEPARATE, ADDITIONAL layer -------------------
-    # This does NOT touch the risk model above (which is unchanged and drives the risk %). It is
-    # pure arithmetic on the customer's own inputs: the PROPOSED debt-to-income (existing EMIs +
-    # this loan's EMI, over income) and the loan serviceable at a DTI level the CUSTOMER chooses.
-    # We make no assumption about what any lender allows.
-    from credit_engine import affordability, affordability_table
-    target_pct = 100   # affordability is checked against a 100% ceiling (all income to EMIs)
-    aff = None
-    if monthly_income and loan_amount and term_months:
-        st.divider()
-        st.markdown("###### Can your income service this loan? *(a separate affordability check — "
-                    "the credit-risk assessment above is unchanged)*")
-        aff = affordability(ans, ceiling=1.0)
-        if aff:
-            st.caption(f"Figures below are computed at the interest rate you entered — "
-                       f"**{aff['rate_pct']:.2f}% per year**. Confirm your applicable rate with the "
-                       "lender for the most accurate results; the model assumes no rate of its own.")
-            a1, a2, a3 = st.columns(3)
-            a1.metric("Your EMI on this loan", f"₹{aff['new_emi']:,.0f}/mo")
-            a2.metric("Proposed debt-to-income", f"{aff['proposed_dti']*100:.0f}%",
-                      help="Your existing EMIs plus this loan's EMI, as a share of income. (The DTI "
-                           "the risk model uses above is existing obligations only — this is an "
-                           "additional figure, it does not change the model.)")
-            a3.metric("Largest loan under 100% DTI", f"₹{aff['max_serviceable_loan']:,.0f}",
-                      help="The largest loan whose EMI keeps your proposed debt-to-income under 100% "
-                           "(i.e. total EMIs stay within your income), at the interest rate you entered.")
-            # Verdict + the 100%-cap explanation the customer needs.
-            _pdti = aff["proposed_dti"] * 100
-            if _pdti < 100:
-                st.success(
-                    f"Your proposed debt-to-income on this loan is **{_pdti:.0f}%** — within 100%, so "
-                    "your income can service the EMIs (with some left over). Lower is more comfortable.",
-                    icon="✅")
-            else:
-                st.warning(
-                    f"**At 100% debt-to-income your entire declared income would be spent on EMIs — "
-                    f"which most lenders will not approve.** Your proposed DTI on this loan is "
-                    f"**{_pdti:.0f}%**. Aim for a **loan amount (or longer tenor, or add a co-applicant's "
-                    f"income) that keeps your proposed DTI below 100%** — the largest loan that fits is "
-                    f"about **₹{aff['max_serviceable_loan']:,.0f}** over this term. This affordability "
-                    "check does not change your credit-risk result above.", icon="⚠️")
-            # reference table: serviceable loan across a range of DTI levels (neutral)
-            at = affordability_table(ans)
-            if at:
-                import pandas as _pd
-                st.markdown("**Loan serviceable at different debt-to-income levels**")
-                _df = _pd.DataFrame([{
-                    "DTI level": f"{int(row['ceiling']*100)}%",
-                    "Max EMI room (₹/mo)": f"₹{row['max_new_emi']:,.0f}",
-                    "Max loan serviceable": f"₹{row['max_loan']:,.0f}",
-                } for row in at["rows"]])
-                st.table(_df)
-                st.caption("A higher level means the EMIs take a larger share of your income. "
-                           "**100% means your entire income goes to EMIs** — most lenders will not "
-                           "approve that, so aim to keep your proposed DTI comfortably below it. "
-                           "Lower levels leave more of your income free after the EMI.")
-        elif expected_roi is None:
-            st.info("Enter your **expected interest rate** in section 2 above to see this loan's EMI, "
-                    "your proposed debt-to-income, and the largest amount your income could service. "
-                    "The tool does not assume a rate — it uses only the one you provide.", icon="ℹ️")
 
     if res["tier"] == 0 and track == "secured":
         st.error("**Precision note** — for a secured loan, not having a credit score reduces "
@@ -969,13 +969,10 @@ if go:
                "breakdown is at the end of your downloadable report.")
 
     # ==================================================================
-    # 8 · Personalised improvement plan (the essence) + PDF report
+    # TAKEAWAY 2 · the improvement plan — the punch that drives this app
     # ==================================================================
-    from improvement_engine import analyse
-    from report_pdf import build_report_pdf
-    plan_res = analyse(ans, router, afford=aff)
-
-    section("8", "How to improve your chance of getting the loan")
+    takeaway(2, "Your route to “yes”",
+             "the changes that move the needle — every impact causally corrected")
     st.markdown(
         "Ranked by how much each change lifts your **chance of getting the loan** — and every impact "
         "is **causally corrected**, so we only push changes that genuinely move the needle "
@@ -987,33 +984,31 @@ if go:
     _aa = plan_res.get("afford_action")
     if _aa and _aa.get("no_capacity"):
         st.error(
-            f"**Your existing EMIs already use up your repayment capacity.** At the "
-            f"{_aa['ceiling_pct']}% debt-to-income level you chose, your current EMIs alone are about "
-            f"**{_aa['existing_dti_pct']}%** of income — leaving no room to add a new loan on this "
-            "income. To create capacity:", icon="🚫")
+            f"**Your existing EMIs already use up your repayment capacity.** Your current EMIs alone "
+            f"are about **{_aa['existing_dti_pct']}%** of your income — leaving no room to add a new "
+            "loan on this income. To create capacity:", icon="🚫")
         st.markdown(
             "- **Add a co-applicant and include their monthly income** — this raises the household "
             "income the loan is serviced from, or\n"
             "- **Clear or reduce some existing EMIs** first, or\n"
             "- **Choose a longer repayment term** so each EMI is smaller.")
         st.caption("This is an affordability (debt-servicing) check — separate from the credit-risk "
-                   "score above. It uses only your own figures and the DTI level you set, and does "
-                   "not change the risk model.")
+                   "score above. It uses only your own figures and does not change the risk model. "
+                   "Full detail in Takeaway 3 below.")
     elif _aa:
         st.error(
-            f"**This loan is larger than your stated income can comfortably service.** At the "
-            f"{_aa['ceiling_pct']}% debt-to-income level you chose, the EMI on "
-            f"₹{_aa['requested']:,.0f} would put you at about **{_aa['proposed_dti_pct']}%** DTI. "
-            f"The most this income could service over the same term is roughly "
-            f"**₹{_aa['max_serviceable_loan']:,.0f}** — about ₹{_aa['shortfall']:,.0f} less than "
-            f"requested. Strongest options:", icon="🎯")
+            f"**This loan is larger than your income can comfortably service.** The EMI on "
+            f"₹{_aa['requested']:,.0f} would put your total debt-to-income at about "
+            f"**{_aa['proposed_dti_pct']}%** — beyond your income. The most this income could service "
+            f"over the same term is about **₹{_aa['max_serviceable_loan']:,.0f}** "
+            f"(≈ ₹{_aa['shortfall']:,.0f} less). Strongest options:", icon="🎯")
         st.markdown(
             f"- **Borrow up to about ₹{_aa['max_serviceable_loan']:,.0f}** over this term, or\n"
             f"- **Choose a longer repayment term** to lower the monthly EMI, or\n"
             f"- **Add a co-applicant's income**, or raise income before applying.")
         st.caption("This is an affordability (debt-servicing) check — separate from the credit-risk "
-                   "score above. It uses only your own figures and the DTI level you set, and does "
-                   "not change the risk model.")
+                   "score above. It uses only your own figures and does not change the risk model. "
+                   "Full detail in Takeaway 3 below.")
 
     # Coverage indicator — reframes 'not sure' answers from a silent failure into a clear signal.
     if plan_res.get("inputs_supplied"):
@@ -1105,6 +1100,58 @@ if go:
         else:
             st.info("From the details you provided, we didn't find high-impact changes to suggest. "
                     "Answering more of the optional questions may reveal opportunities.")
+
+    # ==================================================================
+    # TAKEAWAY 3 · can your income service this loan? (affordability)
+    # ==================================================================
+    takeaway(3, "Can your income service this loan?",
+             "a separate affordability check — your credit-risk verdict above is unchanged")
+    if aff:
+        st.caption(f"Figures are computed at the interest rate you entered — "
+                   f"**{aff['rate_pct']:.2f}% per year**. Confirm your applicable rate with the lender "
+                   "for the most accurate results; the model assumes no rate of its own.")
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Your EMI on this loan", f"₹{aff['new_emi']:,.0f}/mo")
+        a2.metric("Proposed debt-to-income", f"{aff['proposed_dti']*100:.0f}%",
+                  help="Your existing EMIs plus this loan's EMI, as a share of income. (The DTI the "
+                       "risk model uses is existing obligations only — this is an additional figure, "
+                       "it does not change the model.)")
+        a3.metric("Largest loan under 100% DTI", f"₹{aff['max_serviceable_loan']:,.0f}",
+                  help="The largest loan whose EMI keeps your proposed debt-to-income under 100% "
+                       "(i.e. total EMIs stay within your income), at the interest rate you entered.")
+        _pdti = aff["proposed_dti"] * 100
+        if _pdti < 100:
+            st.success(
+                f"Your proposed debt-to-income on this loan is **{_pdti:.0f}%** — within 100%, so your "
+                "income can service the EMIs (with some left over). Lower is more comfortable.", icon="✅")
+        else:
+            st.warning(
+                f"**At 100% debt-to-income your entire declared income would be spent on EMIs — which "
+                f"most lenders will not approve.** Your proposed DTI on this loan is **{_pdti:.0f}%**. "
+                f"Aim for a **loan amount (or longer tenor, or a co-applicant's income) that keeps your "
+                f"proposed DTI below 100%** — the largest loan that fits is about "
+                f"**₹{aff['max_serviceable_loan']:,.0f}** over this term.", icon="⚠️")
+        at = affordability_table(ans)
+        if at:
+            import pandas as _pd
+            st.markdown("**Loan serviceable at different debt-to-income levels**")
+            _df = _pd.DataFrame([{
+                "DTI level": f"{int(row['ceiling']*100)}%",
+                "Max EMI room (₹/mo)": f"₹{row['max_new_emi']:,.0f}",
+                "Max loan serviceable": f"₹{row['max_loan']:,.0f}",
+            } for row in at["rows"]])
+            st.table(_df)
+            st.caption("A higher level means the EMIs take a larger share of your income. "
+                       "**100% means your entire income goes to EMIs** — most lenders will not approve "
+                       "that, so aim to keep your proposed DTI comfortably below it. Lower levels leave "
+                       "more of your income free after the EMI.")
+    elif expected_roi is None:
+        st.info("Enter your **expected interest rate** in section 2 above to see this loan's EMI, your "
+                "proposed debt-to-income, and the largest amount your income could service. The tool "
+                "does not assume a rate — it uses only the one you provide.", icon="ℹ️")
+    else:
+        st.info("Enter your income, the loan amount and the repayment period above to see the "
+                "affordability check.", icon="ℹ️")
 
     pdf_bytes = build_report_pdf(ans, plan_res, applicant_name="Applicant",
                                  product_label=allp[product])
