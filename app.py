@@ -169,6 +169,38 @@ def inr_words(n):
         return f"{n/1e3:.0f} thousand"
     return str(int(n))
 
+# --- Auto Indian-comma-formatted rupee INPUT box (item 10) -------------------------------------
+def _ind_group(digits):
+    """Group a digit string in the Indian system: '10000000' -> '1,00,00,000'."""
+    digits = digits.lstrip("0")
+    if digits == "":
+        return ""
+    if len(digits) <= 3:
+        return digits
+    last3, rest, groups = digits[-3:], digits[:-3], []
+    while len(rest) > 2:
+        groups.insert(0, rest[-2:]); rest = rest[:-2]
+    if rest:
+        groups.insert(0, rest)
+    return ",".join(groups) + "," + last3
+
+def _fmt_rupee_cb(key):
+    """on_change: reformat whatever the user typed into Indian-grouped commas."""
+    digits = "".join(ch for ch in str(st.session_state.get(key, "")) if ch.isdigit())
+    st.session_state[key] = _ind_group(digits)
+
+def rupee_input(label, key, default=0, help=None, max_value=None, placeholder="e.g. 5,00,000"):
+    """A rupee amount box that auto-formats to the Indian comma system as you enter it."""
+    if key not in st.session_state:
+        st.session_state[key] = _ind_group(str(int(default))) if default else ""
+    st.text_input(label, key=key, on_change=_fmt_rupee_cb, args=(key,), help=help,
+                  placeholder=placeholder)
+    digits = "".join(ch for ch in str(st.session_state.get(key, "")) if ch.isdigit())
+    val = int(digits) if digits else 0
+    if max_value is not None and val > max_value:
+        val = int(max_value); st.session_state[key] = _ind_group(str(val))
+    return val
+
 # Indicative Indian-market tenors & interest bands per product, from public bank data
 # (SBI / HDFC / ICICI / Axis schedules and RBI aggregates, mid-2020s). The customer PICKS
 # from these; the exact rate/tenor is confirmed with the lender. We assume no single value.
@@ -329,21 +361,22 @@ section("2", "Your income, age and the loan you want",
         "Everyone knows these, so we ask them outright.")
 a1, a2 = st.columns(2)
 with a1:
-    monthly_income = st.number_input("Monthly take-home income (₹)", 0, 10_000_000, 60_000, 1_000)
-    loan_amount = st.number_input("Loan amount you want (₹)", 0, 100_000_000, 500_000, 10_000)
+    monthly_income = rupee_input("Monthly take-home income (₹)", "in_income", 60_000,
+                                 max_value=10_000_000, placeholder="e.g. 60,000")
+    loan_amount = rupee_input("Loan amount you want (₹)", "in_loan", 500_000,
+                              max_value=100_000_000, placeholder="e.g. 5,00,000")
     age = st.number_input("Your age", 18, 100, 35,
                           help="Everyone knows their age, so there is no 'not sure' option here.")
 with a2:
     if new_to_credit:
         monthly_emi = 0
-        st.number_input("Total monthly EMIs you already pay (all loans) (₹)", 0, 10_000_000, 0,
-                        disabled=True,
-                        help="Locked to 0 — you selected new to credit (no existing loans).")
+        st.text_input("Total monthly EMIs you already pay (all loans) (₹)", value="0", disabled=True,
+                      help="Locked to 0 — you selected new to credit (no existing loans).")
     else:
-        monthly_emi = st.number_input("Total monthly EMIs you already pay (all loans) (₹)",
-                                      0, 10_000_000, 15_000, 1_000,
-                                      help="Add up the EMIs on ALL your current loans — home, vehicle, "
-                                           "personal, consumer-durable, education, and card conversions.")
+        monthly_emi = rupee_input("Total monthly EMIs you already pay (all loans) (₹)", "in_emi",
+                                  15_000, max_value=10_000_000, placeholder="e.g. 15,000",
+                                  help="Add up the EMIs on ALL your current loans — home, vehicle, "
+                                       "personal, consumer-durable, education, and card conversions.")
     _tenors = tenor_options(product)
     term_months = st.selectbox(
         "Repayment period", _tenors,
@@ -351,8 +384,9 @@ with a2:
         format_func=tenor_label,
         help="Tenors Indian lenders typically offer for this product. Confirm the exact tenor with "
              "your lender.")
-    coapplicant_income = st.number_input(
-        "Co-applicant's monthly income (₹, optional)", 0, 10_000_000, 0, 1_000,
+    coapplicant_income = rupee_input(
+        "Co-applicant's monthly income (₹, optional)", "in_coapp", 0,
+        max_value=10_000_000, placeholder="optional",
         help="Applying with a co-applicant (spouse / parent / partner)? Add their monthly income. "
              "It is used only for the affordability (debt-servicing) check — it does NOT change the "
              "credit-risk model, which assesses you on your own profile.")
