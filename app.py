@@ -880,6 +880,7 @@ if go:
     aff = affordability(ans, ceiling=1.0) if (monthly_income and loan_amount and term_months) else None
     plan_res = analyse(ans, router, afford=aff)
     pd_max = READINESS_PD_MAX.get(track, 0.60)
+    _baserate = 20 if track == "unsecured" else 8   # typical default rate for the track (for the explainer)
 
     takeaway(1, "Your loan-readiness verdict", "where you stand today — and exactly how we got there")
     r1, r2 = st.columns([0.44, 0.56])
@@ -929,9 +930,13 @@ if go:
             f'margin-top:9px;line-height:2.0;">100 &times; ( 1 &minus; <b>risk</b> &divide; <b>ceiling</b> )<br>'
             f'= 100 &times; ( 1 &minus; {risk:.3f} &divide; {pd_max:.2f} )<br>'
             f'= <b style="color:var(--brand);font-size:1.2rem;">{readiness} / 100</b></div>'
-            f'<div style="color:var(--ink-2);font-size:.82rem;margin-top:9px;line-height:1.45;">'
-            f'Lower risk &rarr; higher score. The ceiling ({pd_max:.2f}) is the risk level that would '
-            f'score 0, set for {track} loans.</div></div>', unsafe_allow_html=True)
+            f'<div style="color:var(--ink-2);font-size:.82rem;margin-top:9px;line-height:1.5;">'
+            f'<b>Where the {pd_max*100:.0f}% ceiling comes from:</b> it is the default risk at which '
+            f'the readiness score bottoms out at <b>0 / 100</b>. We set it at roughly three times the '
+            f'~{_baserate}% average default rate for {track} loans — a {pd_max*100:.0f}% risk means '
+            f'about {pd_max*100:.0f} in 100 such borrowers default, effectively a certain decline. '
+            f'Pitching it there keeps the 0&ndash;100 score sensitive across the risks real applicants '
+            f'have. Lower risk &rarr; higher score.</div></div>', unsafe_allow_html=True)
     with e2:
         st.markdown('<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
                     'color:var(--ink-muted);font-weight:700;margin-bottom:2px;">'
@@ -939,6 +944,12 @@ if go:
         st.altair_chart(chance_curve_chart(risk, track), use_container_width=True)
         st.caption(f"The dashed line is a typical lender's approval cut-off; the red dot is you. Your "
                    f"{risk*100:.1f}% default risk gives a **{approval_pct:.0f}%** chance of the loan.")
+        st.caption("**How the curve is built:** your default risk is passed through an S-shaped "
+                   "(logistic) curve — the shape lenders' yes/no behaviour tends to follow. Chance of "
+                   "loan and default risk move in **opposite directions**: as risk rises the chance "
+                   "falls — gently while you're well below the cut-off, then steeply as you cross it, "
+                   "then flattening near 0. In short, halving your risk lifts your chance most when "
+                   "you're near that cut-off.")
     st.markdown(
         '<div style="border:1px solid var(--hair);border-radius:10px;padding:12px 15px;'
         'background:var(--surface);color:var(--ink-2);font-size:.93rem;line-height:1.6;margin-top:8px;">'
