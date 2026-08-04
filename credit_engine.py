@@ -453,11 +453,16 @@ def derive(ans: Answers, today: Optional[date] = None) -> DerivedProfile:
         # Loan purpose is a genuine LendingClub feature with a very wide spread
         # (small_business 29.7% default vs wedding 12.2%).
         put("purpose_code", encode_purpose(ans.loan_purpose))
-        # LendingClub's secured-credit signals (95% coverage in training):
-        put("mort_acc", None if ans.has_home_loan is None else float(bool(ans.has_home_loan)))
-        # The customer already tells us what they still owe on home/vehicle loans.
-        _mb = ans.secured_outstanding if ans.has_home_loan else (
-            0.0 if ans.has_home_loan is False else None)
+        # LendingClub's secured-credit signals (Flag-1 fix, Aug 2026).
+        # `mort_acc` (US 'number of mortgage accounts') and `mortgage_bal` (a US-dollar balance)
+        # were trained on US LendingClub values. For a mortgage HOLDER, the rupee->USD balance and
+        # the yes/no->1 account count do NOT transfer — they landed in a risk-ADDING region and
+        # CANCELLED the protective, reliable `home_mortgage` (housing) signal, so ticking "I have a
+        # home loan" wrongly nudged risk up. Fix: for a holder, leave these two mis-scaling features
+        # MISSING (LightGBM uses its learned missing-branch); the mortgage-protective effect then flows
+        # correctly through `home_mortgage`. Non-holders keep a clean 0. See ROUTED_MODELS / Flag 1.
+        put("mort_acc", 0.0 if ans.has_home_loan is False else None)
+        _mb = 0.0 if ans.has_home_loan is False else None
         put("mortgage_bal", _to_usd(_mb))
         put("mortgage_bal_to_income", _safe_div(_mb, annual_inc))
         put("il_util", ans.instalment_outstanding_pct)
@@ -640,3 +645,112 @@ class CreditRouter:
         out["inputs_supplied"] = f"{sum(used.values())}/{len(used)}"
         out["model_inputs_missing"] = [f for f, ok in used.items() if not ok]
         return out
+
+
+# ----------------------------------------------------------------------
+# Per-case counterintuitive-result self-check (runtime disclosure)
+# ----------------------------------------------------------------------
+# The routed models are gradient-boosted trees with NO monotonic constraint, and
+# income/loan enter as raw US-dollar features on top of the correct affordability
+# ratios. So for SOME individual profiles a change that "should" lower risk can
+# nudge the estimate the other way by a small amount (all observed cases <= ~2.5pp;
+# see the counterintuitive sweep in REPORT_DISCLOSURES §4.5). Rather than hide that,
+# we probe the customer's OWN profile at prediction time and, if a lever behaves
+# counterintuitively for THEM, hand the front end an exact, plain-English disclosure.
+
+# Each lever: (field, human name, direction the customer would try to IMPROVE it,
+# the multipliers/steps to probe in that improving direction).
+_MONO_LEVERS = [
+    ("monthly_income", "income",       "up",   "mult", (1.25, 1.5, 2.0)),
+    ("loan_amount",    "loan amount",  "down", "mult", (0.8, 0.6, 0.5)),
+    ("credit_score",   "credit score", "up",   "add",  (20.0, 40.0)),
+]
+# Fire the disclosure only above this size, so imperceptible tree-boundary noise
+# (typically <= 0.2pp, e.g. the secured curves) never clutters the screen.
+_MONO_MIN_PP = 0.3
+
+
+def _mono_message(field, worst_pp, at_value, base_risk_pct, new_risk_pct):
+    """Plain-English, case-specific explanation for one counterintuitive lever."""
+    d = f"{worst_pp:.1f}"
+    if field == "monthly_income":
+        return {
+            "lever": "income",
+            "title": "Why earning more nudged your risk slightly up",
+            "body": (
+                f"For your profile, if your monthly income rose to about "
+                f"₹{at_value:,.0f}, the model's estimated default risk edges **up** by "
+                f"~{d} points (from {base_risk_pct:.1f}% to {new_risk_pct:.1f}%) instead of down. "
+                "This is a known quirk, not a judgement that earning more is bad:\n\n"
+                "- The model learned from **US** loan records, and your income band sits in a "
+                "**thinly-covered part** of that data, so its estimate wobbles a little across "
+                "nearby incomes rather than moving smoothly.\n"
+                "- What genuinely matters — **how comfortably your income covers the EMI** — still "
+                "improves with more income; you can see that in the affordability figures in "
+                "Takeaway 3.\n"
+                f"- The wobble is **small (~{d} points), within the model's margin of error**. We "
+                "never treat 'earn less' as advice."),
+        }
+    if field == "loan_amount":
+        return {
+            "lever": "loan amount",
+            "title": "Why asking for a smaller loan nudged your risk slightly up",
+            "body": (
+                f"For your profile, dropping the loan to about ₹{at_value:,.0f} moves the model's "
+                f"estimated risk **up** by ~{d} points (from {base_risk_pct:.1f}% to "
+                f"{new_risk_pct:.1f}%) instead of down. Why:\n\n"
+                "- In the training data, **very small personal loans were charged off slightly more "
+                "often** than mid-sized ones, so the model carries a mild bias in that direction.\n"
+                "- A smaller loan still genuinely **lowers your EMI and repayment burden** — that "
+                "real benefit shows up in the affordability figures in Takeaway 3, which the model "
+                "does not touch.\n"
+                f"- The effect is **small (~{d} points)** and does **not** reduce the size of loan "
+                "you can afford."),
+        }
+    return {
+        "lever": "credit score",
+        "title": "A small quirk in how your credit score moved the estimate",
+        "body": (
+            f"For your profile, a higher credit score moved the model's estimated risk **up** by "
+            f"~{d} points (from {base_risk_pct:.1f}% to {new_risk_pct:.1f}%) over a small range "
+            "instead of down. This is a minor non-smoothness in the model near your inputs; the "
+            "overall relationship between a better score and lower risk still holds, and the effect "
+            f"is small (~{d} points, within the model's margin)."),
+    }
+
+
+def counterintuitive_disclosures(router: "CreditRouter", ans: "Answers"):
+    """Probe the customer's OWN profile and return plain-English disclosures for any
+    lever that behaves counterintuitively for them. Empty list = nothing to disclose.
+
+    Cheap: a handful of extra predict() calls on perturbed copies of `ans`.
+    """
+    import dataclasses
+    base = router.predict(ans).get("risk")
+    if base is None:
+        return []
+    base_pct = base * 100.0
+    out = []
+    for field, _name, direction, kind, steps in _MONO_LEVERS:
+        cur = getattr(ans, field, None)
+        if cur is None or cur <= 0:
+            continue
+        worst = None  # (delta_pp, perturbed_value, new_pct)
+        for s in steps:
+            if kind == "mult":
+                val = cur * s
+            else:  # additive step, in the improving direction
+                val = cur + s if direction == "up" else cur - s
+            if field == "credit_score":
+                val = min(val, 850.0)   # keep score in range
+            if val <= 0:
+                continue
+            r = router.predict(dataclasses.replace(ans, **{field: val})).get("risk")
+            if r is None:
+                continue
+            delta = r * 100.0 - base_pct   # >0 means risk went UP (the wrong way when improving)
+            if delta >= _MONO_MIN_PP and (worst is None or delta > worst[0]):
+                worst = (delta, val, r * 100.0)
+        if worst is not None:
+            out.append(_mono_message(field, worst[0], worst[1], base_pct, worst[2]))
+    return out

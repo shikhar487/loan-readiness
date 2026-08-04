@@ -1013,6 +1013,27 @@ if go:
                "of default (PD)** for this profile — the figures above are derived from it. The full "
                "breakdown is at the end of your downloadable report.")
 
+    # -- per-case counterintuitive-result disclosure -------------------------
+    # If a lever behaves the "wrong" way for THIS specific profile (e.g. earning
+    # more or borrowing less nudges the estimate up), say so plainly, with the
+    # exact numbers and the honest reason — never leave it as a silent surprise.
+    from credit_engine import counterintuitive_disclosures
+    _disc = counterintuitive_disclosures(router, ans)
+    if _disc:
+        st.markdown(
+            '<div style="border-left:4px solid var(--warning);background:var(--surface);'
+            'border-radius:8px;padding:11px 15px;margin-top:6px;">'
+            '<b style="color:var(--ink);">A couple of results here may look counterintuitive '
+            '— here is exactly why, for your profile.</b><br>'
+            '<span style="color:var(--ink-2);font-size:.9rem;">Our model is honest about its own '
+            'quirks. For the specific details you entered, the changes below move the risk estimate '
+            'in a surprising direction. Click each to understand it in plain English.</span></div>',
+            unsafe_allow_html=True)
+        for _d in _disc:
+            with st.expander("ℹ️  " + _d["title"]):
+                st.markdown(_d["body"])
+        st.write("")
+
     # ==================================================================
     # TAKEAWAY 2 · the improvement plan — the punch that drives this app
     # ==================================================================
