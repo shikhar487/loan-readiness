@@ -986,22 +986,24 @@ if go:
                     'color:var(--ink-muted);font-weight:700;margin:10px 0 2px;">'
                     'How we got it — the curve &amp; the lender cut-off</div>', unsafe_allow_html=True)
         st.altair_chart(chance_curve_chart(risk, track), use_container_width=True)
-        st.caption(f"The dashed line is a typical lender's approval cut-off; the red dot is you. Your "
-                   f"{risk*100:.1f}% default risk gives a **{approval_pct:.0f}%** chance of the loan.")
-        st.caption("**Why it is S-shaped:** your default risk is passed through a logistic curve — the "
-                   "shape lenders' yes/no behaviour tends to follow. Chance and risk move in **opposite "
-                   "directions**: as risk rises the chance falls — gently while you are well below the "
-                   "cut-off, steeply as you cross it, then flattening near 0. Halving your risk lifts "
-                   "your chance most when you are near that cut-off.")
-        st.caption(
-            f"**What sets the shape.** The curve is "
-            f"`chance = 1 / (1 + e^(k × (risk − cut-off)))`, so only two numbers control it and "
-            f"neither is fitted — both are pinned to a stated fact. The **midpoint** is the lender "
-            f"cut-off ({_cut*100:.0f}%): at that risk the curve passes through exactly 50%. The "
-            f"**steepness** k follows from requiring a riskless applicant to read ~99%, which gives "
-            f"k = ln(99) ÷ {_cut*100:.0f}% ≈ **{_k:.1f}** per unit of risk. Written in the usual "
-            f"sigmoid form `1 / (1 + e^−(α + β × risk))`, that is α = ln 99 ≈ **{math.log(99):.2f}** "
-            f"and β = −k ≈ **{-_k:.1f}** — β negative because chance falls as risk rises.")
+        st.caption(f"Dashed line = a typical lender's approval cut-off. Red dot = you. "
+                   f"Your **{risk*100:.1f}%** risk → a **{approval_pct:.0f}%** chance of this loan.")
+        st.markdown(
+            '<div style="color:var(--ink-2);font-size:.82rem;line-height:1.5;margin-top:2px;">'
+            '<b>How to read it:</b>'
+            '<ul style="margin:4px 0 0 0;padding-left:18px;">'
+            '<li>Lower risk → higher chance of the loan.</li>'
+            "<li>The chance drops fastest right around the lender's cut-off.</li>"
+            "<li>Well below the cut-off you're fairly safe; above it, approval falls away quickly.</li>"
+            '</ul></div>', unsafe_allow_html=True)
+        with st.expander("Show the exact formula"):
+            st.caption(
+                f"The curve is `chance = 1 / (1 + e^(k × (risk − cut-off)))`. Two numbers set it, "
+                f"neither fitted to data: the **midpoint** is the lender cut-off ({_cut*100:.0f}%), "
+                f"where the chance is exactly 50%; the **steepness** k comes from making a zero-risk "
+                f"applicant read ~99% — so k = ln(99) ÷ {_cut*100:.0f}% ≈ **{_k:.1f}**. In the "
+                f"standard sigmoid form `1/(1+e^−(α+β·risk))`, α = ln 99 ≈ {math.log(99):.2f} and "
+                f"β = −k ≈ {-_k:.1f} (negative because chance falls as risk rises).")
     with r2:
         t1, t2 = st.columns(2)
         t1.markdown(f'<div class="tile"><div class="k">Loan-readiness score</div>'
@@ -1033,13 +1035,14 @@ if go:
             f'= 100 &times; ( 1 &minus; {risk:.3f} &divide; {pd_max:.2f} )<br>'
             f'= <b style="color:var(--brand);font-size:1.2rem;">{readiness} / 100</b></div>'
             f'<div style="color:var(--ink-2);font-size:.82rem;margin-top:9px;line-height:1.5;">'
-            f'<b>Where the {pd_max*100:.0f}% ceiling comes from:</b> it is the default risk at which '
-            f'the readiness score bottoms out at <b>0 / 100</b>. We set it at about '
-            f'{pd_max*100/_baserate:.0f}&times; the ~{_baserate}% average default rate for {track} '
-            f'loans — a {pd_max*100:.0f}% risk means about {pd_max*100:.0f} in 100 such borrowers '
-            f'default, effectively a certain decline. Pitching it there keeps the 0&ndash;100 score '
-            f'sensitive across the risks real applicants have. Lower risk &rarr; higher score. '
-            f'<b>It is a measuring scale, not an approval threshold</b> — see the note below.</div></div>',
+            f'<b>What the {pd_max*100:.0f}% ceiling is</b> — the risk level where the score hits 0/100:'
+            f'<ul style="margin:4px 0 0 0;padding-left:18px;">'
+            f'<li>Set at ~{pd_max*100/_baserate:.0f}&times; the ~{_baserate}% average default rate for '
+            f'{track} loans.</li>'
+            f'<li>At {pd_max*100:.0f}% risk a decline is near-certain — a fair floor for the scale.</li>'
+            f'<li>Lower risk &rarr; higher score. It <b>measures your profile</b>; it is <b>not</b> an '
+            f'approval cut-off.</li>'
+            f'</ul></div></div>',
             unsafe_allow_html=True)
 
         st.markdown('<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
@@ -1047,16 +1050,19 @@ if go:
                     'What the ceiling actually does — the same risk, scored on four scales</div>',
                     unsafe_allow_html=True)
         st.altair_chart(readiness_ceiling_chart(risk, track), use_container_width=True)
-        st.caption(
-            f"Each line is the *same* formula with a different ceiling. Raising the ceiling stretches "
-            f"the 0–100 scale over a wider band of risk, so every applicant scores higher; lowering it "
-            f"compresses the scale and scores drop. At your {risk*100:.1f}% risk you would read "
-            + " · ".join(
-                f"**{100*(1-min(risk/c,1.0)):.0f}/100** at a {c*100:.0f}% ceiling"
-                for c in sorted({round(min(pd_max*m, 1.0), 2) for m in (0.5, 0.75, 1.0, 1.5)}))
-            + f". We use **{pd_max*100:.0f}%** (the heavy line). Note the ceiling changes the *score* "
-              f"only — it has no effect whatsoever on your chance of the loan, which comes from the "
-              f"curve on the left.")
+        _readings = " · ".join(
+            f"<b>{100*(1-min(risk/c,1.0)):.0f}/100</b> at {c*100:.0f}%"
+            for c in sorted({round(min(pd_max*m, 1.0), 2) for m in (0.5, 0.75, 1.0, 1.5)}))
+        st.markdown(
+            '<div style="color:var(--ink-2);font-size:.82rem;line-height:1.5;">'
+            '<ul style="margin:0;padding-left:18px;">'
+            '<li>Every line is the <b>same</b> score formula — just a different ceiling.</li>'
+            '<li>Higher ceiling → everyone scores higher; lower ceiling → everyone scores lower.</li>'
+            f'<li>At your {risk*100:.1f}% risk you would read {_readings}. We use '
+            f'<b>{pd_max*100:.0f}%</b> (the heavy line).</li>'
+            "<li>The ceiling changes the <b>score only</b> — never your chance of the loan (that comes "
+            'from the curve on the left).</li>'
+            '</ul></div>', unsafe_allow_html=True)
 
     # -- the two thresholds are different numbers doing different jobs ----------
     st.markdown(
@@ -1065,47 +1071,42 @@ if go:
         f'<div style="font-weight:700;color:var(--ink);font-size:.97rem;">'
         f'Two different thresholds — and why both are needed</div>'
         f'<div style="color:var(--ink-2);font-size:.9rem;line-height:1.55;margin-top:7px;">'
-        f'The {_cut*100:.0f}% on the left chart and the {pd_max*100:.0f}% on the right are '
-        f'<b>not the same thing</b>, and neither is the ~{_baserate}% average default rate they are '
-        f'both derived from. Keeping them apart matters:</div>'
+        f'Two numbers, two different jobs — don\'t confuse them (and neither is the ~{_baserate}% '
+        f'average default rate they\'re built from):</div>'
         f'<div style="display:flex;gap:14px;margin-top:11px;flex-wrap:wrap;">'
         f'  <div style="flex:1 1 240px;border:1px solid var(--hair);border-radius:8px;padding:10px 12px;">'
         f'    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;'
         f'         color:var(--ink-muted);font-weight:700;">Average default rate — ~{_baserate}%</div>'
         f'    <div style="color:var(--ink-2);font-size:.86rem;margin-top:5px;line-height:1.45;">'
-        f'      The observed reality of the book: roughly {_baserate} in 100 {track} borrowers '
-        f'      default. It decides nothing on its own — it is the anchor the other two are set from.'
+        f'      Reality of the book: ~{_baserate} in 100 {track} borrowers default. Just the anchor '
+        f'      the other two are set from — it decides nothing itself.'
         f'    </div></div>'
         f'  <div style="flex:1 1 240px;border:1px solid var(--hair);border-radius:8px;padding:10px 12px;">'
         f'    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;'
-        f'         color:#95620A;font-weight:700;">Lender cut-off — {_cut*100:.0f}% '
-        f'      (≈{_cut*100/_baserate:.1f}× the average)</div>'
+        f'         color:#95620A;font-weight:700;">Lender cut-off — {_cut*100:.0f}%</div>'
         f'    <div style="color:var(--ink-2);font-size:.86rem;margin-top:5px;line-height:1.45;">'
-        f'      A <b>decision</b> boundary. Past roughly this risk a typical lender stops approving, '
-        f'      so it is where the curve crosses 50/50. It positions the S-curve and therefore your '
-        f'      <b>chance of this loan</b>.'
+        f'      A <b>decision</b> line: past this risk a typical lender stops approving. It sets your '
+        f'      <b>chance of the loan</b> (the left curve).'
         f'    </div></div>'
         f'  <div style="flex:1 1 240px;border:1px solid var(--hair);border-radius:8px;padding:10px 12px;">'
         f'    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;'
-        f'         color:var(--brand);font-weight:700;">Readiness ceiling — {pd_max*100:.0f}% '
-        f'      (≈{pd_max*100/_baserate:.0f}× the average)</div>'
+        f'         color:var(--brand);font-weight:700;">Readiness ceiling — {pd_max*100:.0f}%</div>'
         f'    <div style="color:var(--ink-2);font-size:.86rem;margin-top:5px;line-height:1.45;">'
-        f'      A <b>measuring</b> scale, not a decision. It is the risk so high that decline is '
-        f'      effectively certain, and it fixes where the 0–100 score bottoms out. It sets your '
-        f'      <b>readiness score</b> and nothing else.'
+        f'      A <b>measuring</b> scale: the risk where the 0–100 score bottoms out. It sets your '
+        f'      <b>readiness score</b> — nothing else.'
         f'    </div></div>'
         f'</div>'
-        f'<div style="color:var(--ink-2);font-size:.88rem;line-height:1.55;margin-top:11px;">'
-        f'<b>Why both are required.</b> They answer different questions, so one number cannot serve '
-        f'for both. Take a borrower sitting exactly at the {_cut*100:.0f}% cut-off: their chance of '
-        f'this loan is a coin flip, yet their readiness score is still '
-        f'{100*(1-min(_cut/pd_max,1.0)):.0f}/100 — because being borderline <i>for one lender today</i> '
-        f'is not the same as having an unlendable profile. Collapsing the two would force a false '
-        f'choice: set the ceiling at {_cut*100:.0f}% and every borderline applicant reads 0/100, which '
-        f'is unfair and kills the score’s ability to show improvement; set the cut-off at '
-        f'{pd_max*100:.0f}% and the app would tell people they are likely to be approved at risks no '
-        f'lender accepts. One tracks <b>the lender’s decision</b>; the other tracks '
-        f'<b>your profile’s strength</b> and the room you have to improve it.</div></div>',
+        f'<div style="color:var(--ink-2);font-size:.88rem;line-height:1.5;margin-top:11px;">'
+        f'<b>Why keep both?</b>'
+        f'<ul style="margin:4px 0 0 0;padding-left:18px;">'
+        f'<li>They answer different questions — approval is a lender\'s yes/no; readiness is how '
+        f'strong your profile is.</li>'
+        f'<li>Example: right at the {_cut*100:.0f}% cut-off your approval chance is 50/50, but your '
+        f'readiness is still {100*(1-min(_cut/pd_max,1.0)):.0f}/100 — borderline today ≠ unlendable.</li>'
+        f'<li>One cut-off can\'t do both: at {_cut*100:.0f}% every borderline applicant would read '
+        f'0/100 (unfair, hides progress); at {pd_max*100:.0f}% we\'d claim likely approval at risks no '
+        f'lender accepts.</li>'
+        f'</ul></div></div>',
         unsafe_allow_html=True)
     st.write("")
     st.markdown(
