@@ -137,6 +137,53 @@ def chance_curve_chart(risk, track):
     return (line + rule + rtext + pt + ptext).properties(height=235)
 
 
+def readiness_ceiling_chart(risk, track):
+    """Readiness score vs default risk, drawn at several ceilings.
+
+    The ceiling is the only free parameter in the readiness score, so showing the
+    same applicant against a range of ceilings makes plain what it does: it sets
+    how fast the 0-100 scale is used up, and nothing else. The line actually in
+    use is drawn heavier; the applicant sits on it.
+    """
+    import altair as alt, pandas as _pd, numpy as _np
+    from improvement_engine import READINESS_PD_MAX
+
+    live = READINESS_PD_MAX.get(track, 0.60)
+    ceilings = sorted({round(min(live * m, 1.0), 2) for m in (0.5, 0.75, 1.0, 1.5)})
+    xmax = max(ceilings)
+    xs = _np.linspace(0, xmax, 180)
+
+    def _label(c):
+        return f"{c * 100:.0f}%" + ("  (in use)" if abs(c - live) < 1e-9 else "")
+
+    rows = [{"risk": x * 100, "score": 100 * (1 - min(x / c, 1.0)),
+             "ceiling": _label(c), "c": c}
+            for c in ceilings for x in xs]
+    df = _pd.DataFrame(rows)
+
+    order = [_label(c) for c in ceilings]
+    # one-hue ordinal ramp (ceiling is an ordered quantity, not a category)
+    ramp = ["#86b6ef", "#5598e7", "#2a78d6", "#184f95"][:len(ceilings)]
+    base = alt.Chart(df).encode(
+        x=alt.X("risk:Q", title="Default risk (%)"),
+        y=alt.Y("score:Q", title="Loan-readiness score", scale=alt.Scale(domain=[0, 100])),
+        color=alt.Color("ceiling:N", title="Ceiling", sort=order,
+                        scale=alt.Scale(domain=order, range=ramp),
+                        legend=alt.Legend(orient="bottom", direction="horizontal",
+                                          columns=4, labelFontSize=11, titleFontSize=11)))
+    others = base.transform_filter(alt.datum.c != live).mark_line(strokeWidth=2, opacity=0.8)
+    inuse = base.transform_filter(alt.datum.c == live).mark_line(strokeWidth=4)
+
+    a = 100 * (1 - min(risk / live, 1.0))
+    pdf = _pd.DataFrame({"risk": [risk * 100], "score": [a]})
+    pt = alt.Chart(pdf).mark_point(size=170, color="#d03b3b", filled=True).encode(
+        x="risk:Q", y="score:Q")
+    ptext = alt.Chart(pdf).mark_text(color="#d03b3b", dx=9, dy=-10, fontSize=12,
+                                     fontWeight="bold").encode(
+        x="risk:Q", y="score:Q", text=alt.value(f"you: {a:.0f}/100"))
+    return (others + inuse + pt + ptext).properties(height=235)
+
+
 # ----------------------------------------------------------------------
 # Indian number formatting (item 10) + product-specific tenor/ROI (item 1)
 # ----------------------------------------------------------------------
@@ -908,13 +955,16 @@ if go:
         band, icon, col = "Low — significant improvements needed", "■", "var(--critical)"
 
     # Compute affordability + the plan up front so the three output sections can be ordered freely.
+    import math
     from credit_engine import affordability, affordability_table
-    from improvement_engine import analyse, READINESS_PD_MAX
+    from improvement_engine import analyse, READINESS_PD_MAX, APPROVAL_PD50
     from report_pdf import build_report_pdf
     aff = affordability(ans, ceiling=1.0) if (monthly_income and loan_amount and term_months) else None
     plan_res = analyse(ans, router, afford=aff)
     pd_max = READINESS_PD_MAX.get(track, 0.60)
     _baserate = 20 if track == "unsecured" else 8   # typical default rate for the track (for the explainer)
+    _cut = APPROVAL_PD50.get(track, 0.30)           # PD at which approval is 50/50 — the lender cut-off
+    _k = math.log(99.0) / _cut                      # curve steepness (approval ≈ 99% at zero risk)
 
     takeaway(1, "Your loan-readiness verdict", "where you stand today — and exactly how we got there")
     r1, r2 = st.columns([0.44, 0.56])
@@ -930,6 +980,28 @@ if go:
   <div class="cap">For a <b>{track}</b> loan
     {"." if res['tier'] >= 1 else ", assessed without a credit score."}</div>
 </div>""", unsafe_allow_html=True)
+
+        # -- the curve that produced the number, directly beneath it -------------
+        st.markdown('<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
+                    'color:var(--ink-muted);font-weight:700;margin:10px 0 2px;">'
+                    'How we got it — the curve &amp; the lender cut-off</div>', unsafe_allow_html=True)
+        st.altair_chart(chance_curve_chart(risk, track), use_container_width=True)
+        st.caption(f"The dashed line is a typical lender's approval cut-off; the red dot is you. Your "
+                   f"{risk*100:.1f}% default risk gives a **{approval_pct:.0f}%** chance of the loan.")
+        st.caption("**Why it is S-shaped:** your default risk is passed through a logistic curve — the "
+                   "shape lenders' yes/no behaviour tends to follow. Chance and risk move in **opposite "
+                   "directions**: as risk rises the chance falls — gently while you are well below the "
+                   "cut-off, steeply as you cross it, then flattening near 0. Halving your risk lifts "
+                   "your chance most when you are near that cut-off.")
+        st.caption(
+            f"**What sets the shape.** The curve is "
+            f"`chance = 1 / (1 + e^(k × (risk − cut-off)))`, so only two numbers control it and "
+            f"neither is fitted — both are pinned to a stated fact. The **midpoint** is the lender "
+            f"cut-off ({_cut*100:.0f}%): at that risk the curve passes through exactly 50%. The "
+            f"**steepness** k follows from requiring a riskless applicant to read ~99%, which gives "
+            f"k = ln(99) ÷ {_cut*100:.0f}% ≈ **{_k:.1f}** per unit of risk. Written in the usual "
+            f"sigmoid form `1 / (1 + e^−(α + β × risk))`, that is α = ln 99 ≈ **{math.log(99):.2f}** "
+            f"and β = −k ≈ **{-_k:.1f}** — β negative because chance falls as risk rises.")
     with r2:
         t1, t2 = st.columns(2)
         t1.markdown(f'<div class="tile"><div class="k">Loan-readiness score</div>'
@@ -950,14 +1022,10 @@ if go:
                     f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
                     f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
 
-    # -- how the two headline numbers were calculated, worked for THIS case, + the curve --
-    st.markdown('<div style="font-size:.98rem;font-weight:700;color:var(--ink);margin-top:8px;">'
-                'How we arrived at these two numbers</div>', unsafe_allow_html=True)
-    e1, e2 = st.columns([0.42, 0.58])
-    with e1:
+        # -- the arithmetic behind the score, directly beneath its own tiles -----
         st.markdown(
             '<div style="border:1px solid var(--hair);border-radius:10px;padding:13px 15px;'
-            'background:var(--surface);">'
+            'background:var(--surface);margin-top:14px;">'
             '<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
             'color:var(--ink-muted);font-weight:700;">Loan-readiness score — the maths for you</div>'
             f'<div style="font-family:ui-monospace,Consolas,monospace;font-size:.98rem;color:var(--ink);'
@@ -966,24 +1034,80 @@ if go:
             f'= <b style="color:var(--brand);font-size:1.2rem;">{readiness} / 100</b></div>'
             f'<div style="color:var(--ink-2);font-size:.82rem;margin-top:9px;line-height:1.5;">'
             f'<b>Where the {pd_max*100:.0f}% ceiling comes from:</b> it is the default risk at which '
-            f'the readiness score bottoms out at <b>0 / 100</b>. We set it at roughly three times the '
-            f'~{_baserate}% average default rate for {track} loans — a {pd_max*100:.0f}% risk means '
-            f'about {pd_max*100:.0f} in 100 such borrowers default, effectively a certain decline. '
-            f'Pitching it there keeps the 0&ndash;100 score sensitive across the risks real applicants '
-            f'have. Lower risk &rarr; higher score.</div></div>', unsafe_allow_html=True)
-    with e2:
+            f'the readiness score bottoms out at <b>0 / 100</b>. We set it at about '
+            f'{pd_max*100/_baserate:.0f}&times; the ~{_baserate}% average default rate for {track} '
+            f'loans — a {pd_max*100:.0f}% risk means about {pd_max*100:.0f} in 100 such borrowers '
+            f'default, effectively a certain decline. Pitching it there keeps the 0&ndash;100 score '
+            f'sensitive across the risks real applicants have. Lower risk &rarr; higher score. '
+            f'<b>It is a measuring scale, not an approval threshold</b> — see the note below.</div></div>',
+            unsafe_allow_html=True)
+
         st.markdown('<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;'
-                    'color:var(--ink-muted);font-weight:700;margin-bottom:2px;">'
-                    'Chance of getting this loan — the curve &amp; the cut-off</div>', unsafe_allow_html=True)
-        st.altair_chart(chance_curve_chart(risk, track), use_container_width=True)
-        st.caption(f"The dashed line is a typical lender's approval cut-off; the red dot is you. Your "
-                   f"{risk*100:.1f}% default risk gives a **{approval_pct:.0f}%** chance of the loan.")
-        st.caption("**How the curve is built:** your default risk is passed through an S-shaped "
-                   "(logistic) curve — the shape lenders' yes/no behaviour tends to follow. Chance of "
-                   "loan and default risk move in **opposite directions**: as risk rises the chance "
-                   "falls — gently while you're well below the cut-off, then steeply as you cross it, "
-                   "then flattening near 0. In short, halving your risk lifts your chance most when "
-                   "you're near that cut-off.")
+                    'color:var(--ink-muted);font-weight:700;margin:12px 0 2px;">'
+                    'What the ceiling actually does — the same risk, scored on four scales</div>',
+                    unsafe_allow_html=True)
+        st.altair_chart(readiness_ceiling_chart(risk, track), use_container_width=True)
+        st.caption(
+            f"Each line is the *same* formula with a different ceiling. Raising the ceiling stretches "
+            f"the 0–100 scale over a wider band of risk, so every applicant scores higher; lowering it "
+            f"compresses the scale and scores drop. At your {risk*100:.1f}% risk you would read "
+            + " · ".join(
+                f"**{100*(1-min(risk/c,1.0)):.0f}/100** at a {c*100:.0f}% ceiling"
+                for c in sorted({round(min(pd_max*m, 1.0), 2) for m in (0.5, 0.75, 1.0, 1.5)}))
+            + f". We use **{pd_max*100:.0f}%** (the heavy line). Note the ceiling changes the *score* "
+              f"only — it has no effect whatsoever on your chance of the loan, which comes from the "
+              f"curve on the left.")
+
+    # -- the two thresholds are different numbers doing different jobs ----------
+    st.markdown(
+        f'<div style="border:1px solid var(--hair);border-left:4px solid var(--brand);'
+        f'border-radius:10px;padding:13px 16px;background:var(--surface);margin-top:14px;">'
+        f'<div style="font-weight:700;color:var(--ink);font-size:.97rem;">'
+        f'Two different thresholds — and why both are needed</div>'
+        f'<div style="color:var(--ink-2);font-size:.9rem;line-height:1.55;margin-top:7px;">'
+        f'The {_cut*100:.0f}% on the left chart and the {pd_max*100:.0f}% on the right are '
+        f'<b>not the same thing</b>, and neither is the ~{_baserate}% average default rate they are '
+        f'both derived from. Keeping them apart matters:</div>'
+        f'<div style="display:flex;gap:14px;margin-top:11px;flex-wrap:wrap;">'
+        f'  <div style="flex:1 1 240px;border:1px solid var(--hair);border-radius:8px;padding:10px 12px;">'
+        f'    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;'
+        f'         color:var(--ink-muted);font-weight:700;">Average default rate — ~{_baserate}%</div>'
+        f'    <div style="color:var(--ink-2);font-size:.86rem;margin-top:5px;line-height:1.45;">'
+        f'      The observed reality of the book: roughly {_baserate} in 100 {track} borrowers '
+        f'      default. It decides nothing on its own — it is the anchor the other two are set from.'
+        f'    </div></div>'
+        f'  <div style="flex:1 1 240px;border:1px solid var(--hair);border-radius:8px;padding:10px 12px;">'
+        f'    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;'
+        f'         color:#95620A;font-weight:700;">Lender cut-off — {_cut*100:.0f}% '
+        f'      (≈{_cut*100/_baserate:.1f}× the average)</div>'
+        f'    <div style="color:var(--ink-2);font-size:.86rem;margin-top:5px;line-height:1.45;">'
+        f'      A <b>decision</b> boundary. Past roughly this risk a typical lender stops approving, '
+        f'      so it is where the curve crosses 50/50. It positions the S-curve and therefore your '
+        f'      <b>chance of this loan</b>.'
+        f'    </div></div>'
+        f'  <div style="flex:1 1 240px;border:1px solid var(--hair);border-radius:8px;padding:10px 12px;">'
+        f'    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;'
+        f'         color:var(--brand);font-weight:700;">Readiness ceiling — {pd_max*100:.0f}% '
+        f'      (≈{pd_max*100/_baserate:.0f}× the average)</div>'
+        f'    <div style="color:var(--ink-2);font-size:.86rem;margin-top:5px;line-height:1.45;">'
+        f'      A <b>measuring</b> scale, not a decision. It is the risk so high that decline is '
+        f'      effectively certain, and it fixes where the 0–100 score bottoms out. It sets your '
+        f'      <b>readiness score</b> and nothing else.'
+        f'    </div></div>'
+        f'</div>'
+        f'<div style="color:var(--ink-2);font-size:.88rem;line-height:1.55;margin-top:11px;">'
+        f'<b>Why both are required.</b> They answer different questions, so one number cannot serve '
+        f'for both. Take a borrower sitting exactly at the {_cut*100:.0f}% cut-off: their chance of '
+        f'this loan is a coin flip, yet their readiness score is still '
+        f'{100*(1-min(_cut/pd_max,1.0)):.0f}/100 — because being borderline <i>for one lender today</i> '
+        f'is not the same as having an unlendable profile. Collapsing the two would force a false '
+        f'choice: set the ceiling at {_cut*100:.0f}% and every borderline applicant reads 0/100, which '
+        f'is unfair and kills the score’s ability to show improvement; set the cut-off at '
+        f'{pd_max*100:.0f}% and the app would tell people they are likely to be approved at risks no '
+        f'lender accepts. One tracks <b>the lender’s decision</b>; the other tracks '
+        f'<b>your profile’s strength</b> and the room you have to improve it.</div></div>',
+        unsafe_allow_html=True)
+    st.write("")
     st.markdown(
         '<div style="border:1px solid var(--hair);border-radius:10px;padding:12px 15px;'
         'background:var(--surface);color:var(--ink-2);font-size:.93rem;line-height:1.6;margin-top:8px;">'
