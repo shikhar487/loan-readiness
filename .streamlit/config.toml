@@ -1,0 +1,54 @@
+# Streamlit native theme — pinned.
+#
+# Without this file the portal inherits the operating system's light/dark setting,
+# which is why it rendered near-black on a Mac in dark mode. Streamlit's own widget
+# chrome (inputs, radios, alerts, tables) is drawn from THESE tokens, not from the
+# custom CSS in app_router.py — so this is where the look is actually set, and the
+# CSS layers on top of it rather than fighting it.
+#
+# Palette: warm paper neutrals against a cool indigo accent. The warm/cool tension
+# is what stops it reading as a default Streamlit app.
+
+[theme]
+base = "light"
+
+primaryColor = "#3352D1"
+backgroundColor = "#F5F4F0"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#14140F"
+linkColor = "#2A45B0"
+borderColor = "#E4E2DA"
+
+baseRadius = "0.8rem"
+buttonRadius = "0.7rem"
+showWidgetBorder = true
+
+baseFontSize = 16
+font = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
+headingFontWeights = [760, 700, 660]
+
+# Status colours. Each pairs a solid hue with a tinted background and a darker text
+# tone, so alerts stay legible rather than relying on the hue alone.
+greenColor = "#0F8A4D"
+greenBackgroundColor = "#E6F5EC"
+greenTextColor = "#0A5E35"
+
+yellowColor = "#B8790A"
+yellowBackgroundColor = "#FBF2DC"
+yellowTextColor = "#7A4F05"
+
+orangeColor = "#D0691F"
+orangeBackgroundColor = "#FCEEE2"
+orangeTextColor = "#8A4412"
+
+redColor = "#C4372F"
+redBackgroundColor = "#FBE9E7"
+redTextColor = "#8E241E"
+
+blueColor = "#3352D1"
+blueBackgroundColor = "#E8EDFC"
+blueTextColor = "#22369C"
+
+grayColor = "#8B8880"
+grayBackgroundColor = "#F1EFE9"
+grayTextColor = "#55534C"
