@@ -56,6 +56,41 @@ UNSECURED_INCOME_MULTIPLE_LIMIT = 50
 REPAYMENT_AGE_LIMIT = 70
 
 
+def employment_issues(employed_12m: Any = None,
+                      employment_type: Optional[str] = None
+                      ) -> Tuple[List[Issue], List[Issue]]:
+    """The employment pair on its own — (errors, warnings).
+
+    Split out of `validate()` so the portal can also show it INLINE, in the step where
+    both answers sit, instead of only in the summary at the foot of the form. Both
+    questions are in step 7, so the contradiction is visible the moment it is created;
+    waiting until every other question is answered to mention it reads as the tool
+    noticing far too late.
+
+    `validate()` still calls this, so the rule has exactly one definition and the inline
+    card and the blocking summary can never disagree.
+    """
+    errors: List[Issue] = []
+    warnings: List[Issue] = []
+    if employed_12m is True:
+        if employment_type == "not_working":
+            errors.append(Issue(
+                "employed_but_not_working",
+                "You are both continuously employed and not working",
+                "You said you have been continuously employed for the last 12 months, but "
+                'gave your employment type as "Not currently working". These cannot both '
+                "be true — correct whichever one is wrong."))
+        elif employment_type == "retired":
+            warnings.append(Issue(
+                "employed_but_retired",
+                "You are both continuously employed and retired",
+                "You said you have been continuously employed for the last 12 months and "
+                'also gave your employment type as "Retired / pensioner". That is possible '
+                "if you draw a pension while still working, but it is unusual enough to be "
+                "worth confirming."))
+    return errors, warnings
+
+
 def _num(v) -> Optional[float]:
     """Coerce to float, treating None/blank/non-numeric as absent."""
     if v is None:
@@ -73,6 +108,15 @@ def validate(
     new_to_credit: bool = False,
     asset_scenario: Optional[str] = None,
     today: Optional[date] = None,
+    # employment
+    employed_12m: Any = None,
+    employment_type: Optional[str] = None,
+    # property / vehicle coherence
+    housing: Optional[str] = None,
+    owns_property: Any = None,
+    owns_car: Any = None,
+    has_home_loan: Any = None,
+    has_vehicle_loan: Any = None,
     # core financials
     monthly_income: Any = None,
     coapplicant_income: Any = None,
@@ -153,6 +197,44 @@ def validate(
                   f"You would be about {age_at_end:.0f} when the final EMI is due. Most "
                   f"lenders want the loan closed by around {REPAYMENT_AGE_LIMIT}, so a "
                   "shorter tenor or a younger co-applicant may be required.")
+
+    # ------------------------------------------------------------------
+    # Employment coherence — the two employment answers must agree
+    # ------------------------------------------------------------------
+    # Defined in employment_issues() so the inline card in step 7 and this blocking
+    # summary are the same rule, not two copies that can drift apart.
+    _emp_e, _emp_w = employment_issues(employed_12m, employment_type)
+    errors.extend(_emp_e)
+    warnings.extend(_emp_w)
+
+    # ------------------------------------------------------------------
+    # Housing / property / vehicle coherence
+    #
+    # Only the flatly impossible pairs are errors. Owning a home outright while also
+    # servicing a home loan is entirely possible — two properties — so that is a
+    # warning, not a block. Note `housing` is only asked on the unsecured track and
+    # `owns_property` only on the secured one, so those two never meet; each is
+    # checked against the secured-loan answers from step 5, which both tracks give.
+    # ------------------------------------------------------------------
+    if has_home_loan is True and owns_property is False:
+        E("home_loan_without_property", "You have a home loan but do not own a property",
+          "A home loan is secured on a property you own. Either you do own one, or the "
+          "loan you are thinking of is a different kind — check both answers.")
+
+    if housing == "paying_home_loan" and has_home_loan is False:
+        E("housing_says_home_loan", "Your housing situation says you are paying a home loan",
+          'You chose "Paying home loan" as your housing situation, then answered No to '
+          "having a home loan. One of the two is wrong.")
+
+    if housing == "own_outright" and has_home_loan is True:
+        W("owns_outright_with_home_loan", "You own your home outright but also have a home loan",
+          "That works if the loan is on a second property. If it is on the home you "
+          'live in, "Paying home loan" is the closer description of your housing.')
+
+    if has_vehicle_loan is True and owns_car is False:
+        W("vehicle_loan_without_car", "You have a vehicle loan but do not own a car",
+          "This is fine if the loan is on a two-wheeler or a commercial vehicle rather "
+          "than a car. If it is on a car, correct the ownership answer.")
 
     # ------------------------------------------------------------------
     # Debt-to-income comfort (the >=100% case is surfaced separately, up top)

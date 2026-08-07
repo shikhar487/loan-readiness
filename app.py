@@ -19,7 +19,7 @@ import streamlit as st
 from credit_engine import (Answers, CreditRouter, load_registry,
                            UNSECURED_PRODUCTS, SECURED_PRODUCTS, BUREAU_RANGES,
                            UI_EMPLOYMENT_LABELS, UI_PURPOSE_LABELS)
-from validation import validate
+from validation import validate, employment_issues
 
 st.set_page_config(page_title="Loan Readiness Check", page_icon="🏦",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -610,6 +610,42 @@ def tri_select(label, key, options, fmt=None, help=None):
     return None, None
 
 
+UNSURE_OPT = "__unsure__"
+
+
+def plain_select(label, key, options, fmt=None, help=None, caption=None):
+    """The real options plus "Not sure" — no "I don't have any".
+
+    tri_select's three-way vocabulary fits a QUANTITY you might not hold (cards,
+    loans). It misfires on two other kinds of question, and this helper is for those:
+
+      * Facts everyone has — a housing situation, a loan purpose, an employment type.
+        "I don't have any" captioned itself "Recorded as not applicable", which means
+        nothing here.
+      * Counts where zero is already an option (the enquiry questions). There
+        "I don't have any" was worse than meaningless: it returned None, so a customer
+        who meant "zero enquiries" had MISSING sent to the model instead of the 0
+        sitting right there in the list.
+
+    "Not sure" is kept in both cases — not knowing is still a real answer (§3A), and
+    it is the only one that legitimately maps to None.
+    """
+    _required.append((key, label))
+    with st.container(border=True):
+        st.markdown(f"**{label}**")
+        if caption:
+            st.caption(caption)
+        v = st.selectbox(label, list(options) + [UNSURE_OPT], index=None,
+                         key=f"tri_{key}", label_visibility="collapsed",
+                         placeholder="Select one…", help=help,
+                         format_func=lambda x: ("Not sure" if x == UNSURE_OPT
+                                                else (fmt(x) if fmt else str(x))))
+        if v == UNSURE_OPT:
+            st.caption("Left blank — the model is told nothing rather than a guess.")
+            return None
+        return v
+
+
 def tri_yesno(label, key, help=None):
     _required.append((key, label))
     with st.container(border=True):
@@ -646,6 +682,7 @@ _STEPS = {
 }
 _LAST_STEP = max(_STEPS)
 st.session_state.setdefault("_done", {})
+st.session_state.setdefault("_seen", {})   # steps ever unlocked — never re-locked
 _bounds = {}
 
 
@@ -658,8 +695,26 @@ def _current_step():
 
 
 def _unlocked(n):
-    """A step renders once every step before it is complete."""
-    return all(st.session_state["_done"].get(k) for k in range(1, n))
+    """A step renders once every step before it is complete — and then stays rendered.
+
+    The stickiness is load-bearing, not a nicety. Recomputing this from `_done` alone
+    means a step RE-LOCKS whenever an earlier one stops being complete — and an earlier
+    step can stop being complete just by being edited: answering "Yes" to the home-loan
+    question adds three sub-questions, so step 5 goes incomplete the moment it is
+    changed. A re-locked step renders `_locked_strip` instead of its widgets, and
+    Streamlit garbage-collects an absent widget's session_state after a full rerun, so
+    every answer below the edit is silently destroyed (verified: the whole of steps 6
+    and 7 had to be re-entered after flipping one answer in step 5).
+
+    Once seen, therefore, a step is never hidden again — which is what UI_DESIGN §4.5
+    says the design intends.
+    """
+    if st.session_state["_seen"].get(n):
+        return True
+    ok = all(st.session_state["_done"].get(k) for k in range(1, n))
+    if ok:
+        st.session_state["_seen"][n] = True
+    return ok
 
 
 def _panel(n):
@@ -678,12 +733,22 @@ def _close(n, extra=True):
     was = bool(st.session_state["_done"].get(n))
     now = bool(answered and extra)
     st.session_state["_done"][n] = now
-    # A panel's expanded/collapsed state is decided when it is created, which is
-    # before this runs — so on the render where a step completes, it would stay
-    # open next to the one it just unlocked. Rerunning once settles both.
-    # `was != now` keeps it to a single pass: after the rerun the flag matches
-    # and it stops, so this cannot loop.
-    if was != now:
+    # A panel's expanded/collapsed state is decided when it is created, which is before
+    # this runs — so on the render where a step completes, it would stay open next to
+    # the one it just unlocked. Rerunning once settles both.
+    #
+    # But st.rerun() TRUNCATES the script: nothing below this line renders for that run,
+    # and Streamlit garbage-collects the session_state of any widget that failed to
+    # render. So rerunning on every change silently wiped every answer below the edit
+    # whenever a completed form was revisited — flipping the home-loan answer in step 5
+    # emptied steps 6 and 7.
+    #
+    # It therefore fires only when finishing this step reveals a step never seen before,
+    # which is the only case the expander-settling was for. Re-editing a form whose later
+    # steps are already on screen changes nothing about what is expanded, so it does not
+    # rerun and nothing is truncated. (`_seen[n+1]` is set by _unlocked() further down the
+    # script, so at this point it still reads False on a genuine first completion.)
+    if not was and now and n < _LAST_STEP and not st.session_state["_seen"].get(n + 1):
         st.rerun()
 
 
@@ -1013,11 +1078,11 @@ if _unlocked(4):
                                "no defaults · no credit history yet. Just tell us your housing and purpose.")
                 h1, h2 = st.columns(2)
                 with h1:
-                    housing, _ = tri_select("Your housing situation", "house",
-                                            ["own_outright", "paying_home_loan", "rented", "with_family"],
-                                            lambda x: x.replace("_", " ").title())
+                    housing = plain_select("Your housing situation", "house",
+                                           ["own_outright", "paying_home_loan", "rented", "with_family"],
+                                           lambda x: x.replace("_", " ").title())
                 with h2:
-                    loan_purpose, _ = tri_select(
+                    loan_purpose = plain_select(
                         "Purpose of the loan", "purpose", list(UI_PURPOSE_LABELS),
                         lambda x: UI_PURPOSE_LABELS[x])
             else:
@@ -1040,22 +1105,22 @@ if _unlocked(4):
                                                      min_value=0, max_value=10_000_000, value=50_000, step=5_000)
                         num_credit_lines, _ = tri_number("How many cards / active credit lines?", "ncl",
                                                          min_value=0, max_value=50, value=3)
-                    enquiries_6m, _ = tri_select("Loans or cards applied for in the last 6 months", "enq6",
-                                                 [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
+                    enquiries_6m = plain_select("Loans or cards applied for in the last 6 months", "enq6",
+                                                [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
                 with u2:
                     if not _no_cards:
                         card_limit, _ = tri_number("Total credit limit across all cards (₹)", "cl",
                                                    min_value=0, max_value=10_000_000, value=200_000, step=5_000)
-                    new_accounts_24m, _ = tri_select(
+                    new_accounts_24m = plain_select(
                         "New loans or credit cards you OPENED in the last 24 months", "na24",
                         [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x),
                         help="Count every brand-new credit account you actually opened in the last 2 years — "
                              "any new loan (home, auto, personal, consumer-durable, education) or a new credit "
                              "card. Do NOT count: applications/enquiries that didn't open, accounts opened "
                              "earlier, or accounts you've since closed.")
-                    housing, _ = tri_select("Your housing situation", "house",
-                                            ["own_outright", "paying_home_loan", "rented", "with_family"],
-                                            lambda x: x.replace("_", " ").title())
+                    housing = plain_select("Your housing situation", "house",
+                                           ["own_outright", "paying_home_loan", "rented", "with_family"],
+                                           lambda x: x.replace("_", " ").title())
                 if card_balance and card_limit:
                     chip(f"Card utilisation derived: **{card_balance/card_limit*100:.1f}%**")
                 v1, v2 = st.columns(2)
@@ -1068,7 +1133,7 @@ if _unlocked(4):
                     first_credit_year, _ = tri_number("Year you took your first loan or card", "fcy",
                                                       min_value=1970, max_value=2026, value=2015, zero=None)
                 with w2:
-                    loan_purpose, _ = tri_select(
+                    loan_purpose = plain_select(
                         "Purpose of the loan", "purpose", list(UI_PURPOSE_LABELS),
                         lambda x: UI_PURPOSE_LABELS[x],
                         help="Purpose matters a lot: in the training data, business loans default "
@@ -1114,9 +1179,9 @@ if _unlocked(4):
                 asset_value, _ = tri_number(value_label, "av", min_value=0, max_value=500_000_000,
                                             value=6_000_000, step=100_000, zero=None)
                 owns_property, _ = tri_yesno("Do you already own a house or property?", "ownprop")
-                education, _ = tri_select("Highest education", "edu",
-                                          ["secondary", "higher_secondary", "graduate", "post_graduate"],
-                                          lambda x: x.replace("_", " ").title())
+                education = plain_select("Highest education", "edu",
+                                         ["secondary", "higher_secondary", "graduate", "post_graduate"],
+                                         lambda x: x.replace("_", " ").title())
             with s2:
                 if asset_scenario == "mortgage_existing":
                     st.container(border=True).info(
@@ -1131,8 +1196,8 @@ if _unlocked(4):
                     enquiries_12m = 0
                     st.caption("🔒 Bureau enquiries locked to 0 — you selected new to credit.")
                 else:
-                    enquiries_12m, _ = tri_select("Bureau enquiries in the last 12 months", "enq12",
-                                                  [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
+                    enquiries_12m = plain_select("Bureau enquiries in the last 12 months", "enq12",
+                                                 [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
             if asset_value:
                 chip(f"Loan-to-value derived: **{loan_amount/asset_value*100:.1f}%**")
 
@@ -1278,11 +1343,17 @@ if _unlocked(7):
         with d1:
             employed_12m, _ = tri_yesno("Continuously employed for the last 12 months?", "emp12")
             missed_emi_6m, _ = tri_yesno("Missed any EMI or card payment in the last 6 months?", "me6")
-            employment_type, _ = tri_select(
+            # Asked directly rather than through tri_select. The option list already
+            # covers every real situation — "Retired / pensioner" and "Not currently
+            # working" are both in it — so the tri-state's "I don't have any" branch was
+            # both redundant AND able to contradict the employment question above it
+            # ("continuously employed: Yes" plus "no employment type").
+            # "Not sure" is kept, because not knowing remains a genuine answer (§3A).
+            employment_type = plain_select(
                 "Employment type", "emptype", list(UI_EMPLOYMENT_LABELS),
                 lambda x: UI_EMPLOYMENT_LABELS[x],
-                help="Strong signal in the training data: government/PSU employees default "
-                     "at 5.8% versus 9.6% for private salaried.")
+                help="Strong signal in the training data: government/PSU employees "
+                     "default at 5.8% versus 9.6% for private salaried.")
         with d2:
             job_change_6m, _ = tri_yesno("Changed jobs in the last 6 months?", "jc6")
             large_expense, _ = tri_yesno("Any large unplanned expense recently?", "lue")
@@ -1316,6 +1387,22 @@ if _unlocked(7):
                 elif _chg == NOTSURE:
                     income_change = None
                     st.caption("Left blank — the model is told nothing rather than a guess.")
+
+        # Both employment answers live in THIS step, so the contradiction between them is
+        # shown here the moment it is created. The summary at the foot of the form repeats
+        # it and is what actually blocks submission — but by then the customer has answered
+        # everything else, and being told only at the end reads as the tool noticing far too
+        # late. Same rule in both places (validation.employment_issues), so they cannot
+        # disagree. Cross-STEP contradictions cannot be done this way: the answers they
+        # compare are not all on screen yet.
+        for _issue in employment_issues(employed_12m, employment_type)[0]:
+            st.markdown(f'<div class="v-issue v-error"><div class="v-label">{_issue.label}</div>'
+                        f'<div class="v-detail">{_issue.detail}</div></div>',
+                        unsafe_allow_html=True)
+        for _issue in employment_issues(employed_12m, employment_type)[1]:
+            st.markdown(f'<div class="v-issue v-warn"><div class="v-label">{_issue.label}</div>'
+                        f'<div class="v-detail">{_issue.detail}</div></div>',
+                        unsafe_allow_html=True)
     _close(7)
 else:
     _locked_strip(7)
@@ -1364,6 +1451,9 @@ if unanswered:
 errors, warns = validate(
     track=track, product=product, new_to_credit=new_to_credit,
     asset_scenario=asset_scenario,
+    employed_12m=employed_12m, employment_type=employment_type,
+    housing=housing, owns_property=owns_property, owns_car=owns_car,
+    has_home_loan=has_home_loan, has_vehicle_loan=has_vehicle_loan,
     monthly_income=monthly_income, coapplicant_income=coapplicant_income,
     monthly_emi=monthly_emi, loan_amount=loan_amount, term_months=term_months,
     expected_roi=expected_roi, age=age,
