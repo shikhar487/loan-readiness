@@ -588,7 +588,8 @@ def tri_number(label, key, zero=0.0, help=None, allow_none=True, **kw):
         state = st.radio("Availability", _opts, index=None, horizontal=True,
                          key=f"tri_{key}", label_visibility="collapsed", help=help)
         if state == HAVE:
-            return st.number_input("Enter value", key=f"val_{key}",
+            kw.pop("value", None)   # no pre-filled default — the user enters their own value
+            return st.number_input("Enter value", key=f"val_{key}", value=None,
                                    label_visibility="collapsed", **kw), state
         if state == NONE:
             st.caption("Recorded as zero.")
@@ -606,8 +607,9 @@ def tri_select(label, key, options, fmt=None, help=None):
         state = st.radio("Availability", [HAVE, NONE, UNSURE], index=None, horizontal=True,
                          key=f"tri_{key}", label_visibility="collapsed", help=help)
         if state == HAVE:
-            return st.selectbox("Choose", options, key=f"val_{key}",
-                                format_func=fmt or str, label_visibility="collapsed"), state
+            return st.selectbox("Choose", options, index=None, key=f"val_{key}",
+                                format_func=fmt or str, label_visibility="collapsed",
+                                placeholder="Select one…"), state
         if state in (NONE, UNSURE):
             st.caption("Left blank." if state == UNSURE else "Recorded as not applicable.")
             return None, state
@@ -733,7 +735,19 @@ def _close(n, extra=True):
     """Mark the step complete when every question it registered has an answer.
     `extra` carries any requirement that is not a tri-state widget."""
     mine = _required[_bounds.get(n, 0):]
-    answered = all(st.session_state.get(f"tri_{k}") is not None for k, _ in mine)
+
+    def _filled(k):
+        # A tri-state is "answered" once picked — EXCEPT "I have this", which also needs
+        # its value entered. This stops the wizard skipping ahead the moment someone
+        # picks "I have this" but before they type the number/choose the option.
+        s = st.session_state.get(f"tri_{k}")
+        if s is None:
+            return False
+        if s == HAVE:
+            return st.session_state.get(f"val_{k}") is not None
+        return True
+
+    answered = all(_filled(k) for k, _ in mine)
     was = bool(st.session_state["_done"].get(n))
     now = bool(answered and extra)
     st.session_state["_done"][n] = now
@@ -847,11 +861,11 @@ if _unlocked(2):
                 "Everyone knows these, so we ask them outright.")
         a1, a2 = st.columns(2)
         with a1:
-            monthly_income = rupee_input("Monthly take-home income (₹)", "in_income", 60_000,
+            monthly_income = rupee_input("Monthly take-home income (₹)", "in_income", 0,
                                          max_value=10_000_000, placeholder="e.g. 60,000")
-            loan_amount = rupee_input("Loan amount you want (₹)", "in_loan", 500_000,
+            loan_amount = rupee_input("Loan amount you want (₹)", "in_loan", 0,
                                       max_value=100_000_000, placeholder="e.g. 5,00,000")
-            age = st.number_input("Your age", 18, 70, 35,
+            age = st.number_input("Your age", 18, 70, value=None,
                                   help="Applicants aged 18–70 are supported — a lender's usual eligibility "
                                        "range. Everyone knows their age, so there is no 'not sure' option.")
         with a2:
@@ -861,7 +875,7 @@ if _unlocked(2):
                               help="Locked to 0 — you selected new to credit (no existing loans).")
             else:
                 monthly_emi = rupee_input("Total monthly EMIs you already pay (all loans) (₹)", "in_emi",
-                                          15_000, max_value=10_000_000, placeholder="e.g. 15,000",
+                                          0, max_value=10_000_000, placeholder="e.g. 15,000",
                                           help="Add up the EMIs on ALL your current loans — home, vehicle, "
                                                "personal, consumer-durable, education, and card conversions.")
             _tenors = tenor_options(product)
@@ -879,7 +893,7 @@ if _unlocked(2):
                      "credit-risk model, which assesses you on your own profile.")
             if coapplicant_income and coapplicant_income > 0:
                 coapplicant_age = st.number_input(
-                    "Co-applicant's age", 18, 70, 35, key="in_coapp_age",
+                    "Co-applicant's age", 18, 70, value=None, key="in_coapp_age",
                     help="A younger co-applicant can make a longer tenor acceptable — we use the younger "
                          "age to check the loan can close within a lender's age limit.")
 
@@ -970,7 +984,8 @@ if _unlocked(2):
             elif loan_amount and term_months:
                 chip("Enter your expected interest rate above to estimate this loan's EMI, your proposed "
                      "debt-to-income, and the amount your income could service.")
-    _close(2, (expected_roi is not None))
+    _close(2, (expected_roi is not None and bool(monthly_income) and bool(loan_amount)
+               and age is not None))
 else:
     _locked_strip(2)
 
@@ -1165,7 +1180,10 @@ if _unlocked(4):
                     has_default_record, _ = tri_yesno("Any default, write-off or legal/recovery case?", "defrec")
                 w1, w2 = st.columns(2)
                 with w1:
+                    # This asks about the FIRST loan/card of someone who has credit — "I don't have any"
+                    # is ambiguous (it reads as "no current loan"). Offer only remember (enter year) / not.
                     first_credit_year, _ = tri_number("Year you took your first loan or card", "fcy",
+                                                      allow_none=False,
                                                       min_value=1970, max_value=2026, value=2015, zero=None)
                 with w2:
                     loan_purpose = plain_select(
@@ -1242,11 +1260,11 @@ if _unlocked(4):
                        "how much of your earnings is already committed.")
             f1, f2 = st.columns(2)
             with f1:
-                family_total = st.number_input("Total members in your family", 1, 15, 3,
+                family_total = st.number_input("Total members in your family", 1, 15, value=None,
                                                help="Everyone living in your household, "
                                                     "including yourself.")
             with f2:
-                dependents = st.number_input("How many of them are your dependents?", 0, 15, 1)
+                dependents = st.number_input("How many of them are your dependents?", 0, 15, value=None)
 
             with st.expander("Who counts as a dependent?"):
                 st.markdown("""
