@@ -52,8 +52,8 @@ LTV_CAPS = {"home_loan": 0.90, "loan_against_property": 0.75, "auto_loan": 0.85}
 # LendingClub training range (max ~$40k), where the model's score saturates.
 UNSECURED_INCOME_MULTIPLE_LIMIT = 50
 
-# Age by which a loan would normally have to be repaid.
-REPAYMENT_AGE_LIMIT = 70
+# Age by which a loan would normally have to be repaid (a common lender ceiling).
+REPAYMENT_AGE_LIMIT = 75
 
 
 def employment_issues(employed_12m: Any = None,
@@ -125,6 +125,7 @@ def validate(
     term_months: Any = None,
     expected_roi: Any = None,
     age: Any = None,
+    coapplicant_age: Any = None,
     # unsecured
     card_balance: Any = None,
     card_limit: Any = None,
@@ -191,12 +192,17 @@ def validate(
                   "either the year or your age.")
 
         if term and term > 0:
-            age_at_end = yrs + term / 12.0
+            # A younger co-applicant can carry the tenor, so assess against the YOUNGER age.
+            co_yrs = _num(coapplicant_age)
+            eff_age = min(yrs, co_yrs) if co_yrs else yrs
+            age_at_end = eff_age + term / 12.0
             if age_at_end > REPAYMENT_AGE_LIMIT:
-                W("term_past_retirement", "This loan runs well past normal retirement age",
-                  f"You would be about {age_at_end:.0f} when the final EMI is due. Most "
-                  f"lenders want the loan closed by around {REPAYMENT_AGE_LIMIT}, so a "
-                  "shorter tenor or a younger co-applicant may be required.")
+                _who = "the younger applicant" if (co_yrs and co_yrs < yrs) else "you"
+                W("term_past_retirement", "This tenor may run past a lender's age limit",
+                  f"{_who.capitalize()} would be about {age_at_end:.0f} when the final EMI is due. "
+                  f"Many lenders require the loan to close by around {REPAYMENT_AGE_LIMIT}, so they "
+                  "may not agree to this tenor. Choose a shorter repayment period, or add a younger "
+                  "co-applicant (enter their age and income above) so the loan can close in time.")
 
     # ------------------------------------------------------------------
     # Employment coherence — the two employment answers must agree

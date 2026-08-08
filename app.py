@@ -577,11 +577,15 @@ YES, NO, NOTSURE = "Yes", "No", "Not sure"
 _required = []
 
 
-def tri_number(label, key, zero=0.0, help=None, **kw):
+def tri_number(label, key, zero=0.0, help=None, allow_none=True, **kw):
+    # allow_none=False drops the "I don't have any" choice — used where an earlier
+    # answer has already established the thing exists (e.g. "yes, I use credit cards"
+    # then the card COUNT cannot be "none"). Prevents contradictory responses.
     _required.append((key, label))
     with st.container(border=True):
         st.markdown(f"**{label}**")
-        state = st.radio("Availability", [HAVE, NONE, UNSURE], index=None, horizontal=True,
+        _opts = [HAVE, NONE, UNSURE] if allow_none else [HAVE, UNSURE]
+        state = st.radio("Availability", _opts, index=None, horizontal=True,
                          key=f"tri_{key}", label_visibility="collapsed", help=help)
         if state == HAVE:
             return st.number_input("Enter value", key=f"val_{key}",
@@ -766,6 +770,7 @@ def _locked_strip(n):
 monthly_income = loan_amount = monthly_emi = coapplicant_income = 0
 term_months = expected_roi = None
 age = 35
+coapplicant_age = None
 credit_score = credit_bureau = additional_score = additional_score_type = None
 first_credit_year = education = employment_type = None
 card_balance = card_limit = num_credit_lines = None
@@ -846,8 +851,9 @@ if _unlocked(2):
                                          max_value=10_000_000, placeholder="e.g. 60,000")
             loan_amount = rupee_input("Loan amount you want (₹)", "in_loan", 500_000,
                                       max_value=100_000_000, placeholder="e.g. 5,00,000")
-            age = st.number_input("Your age", 18, 100, 35,
-                                  help="Everyone knows their age, so there is no 'not sure' option here.")
+            age = st.number_input("Your age", 18, 70, 35,
+                                  help="Applicants aged 18–70 are supported — a lender's usual eligibility "
+                                       "range. Everyone knows their age, so there is no 'not sure' option.")
         with a2:
             if new_to_credit:
                 monthly_emi = 0
@@ -871,6 +877,11 @@ if _unlocked(2):
                 help="Applying with a co-applicant (spouse / parent / partner)? Add their monthly income. "
                      "It is used only for the affordability (debt-servicing) check — it does NOT change the "
                      "credit-risk model, which assesses you on your own profile.")
+            if coapplicant_income and coapplicant_income > 0:
+                coapplicant_age = st.number_input(
+                    "Co-applicant's age", 18, 70, 35, key="in_coapp_age",
+                    help="A younger co-applicant can make a longer tenor acceptable — we use the younger "
+                         "age to check the loan can close within a lender's age limit.")
 
         # Change 2 — if a co-applicant income is added, remind the customer to include the co-applicant's
         # EMIs in the total-EMI figure too, so the household income is compared against household obligations.
@@ -1024,25 +1035,35 @@ if _unlocked(3):
                 elif score_state == UNSURE:
                     st.caption("We'll use the no-score model and widen the confidence band.")
 
-            # --- additional lender score: pick the TYPE, or say it's unavailable ----
-            NOT_AVAILABLE = "Not available with me"
-            SCORE_TYPES = ["Lender's own internal score", "Alternative-data / fintech score",
-                           "Account-aggregator based score", "Telecom or utility score",
-                           "Other lender score", NOT_AVAILABLE]
-            _required.append(("extra_type", "Additional lender score"))
+            # --- additional lender score: Yes/No, then the value within its own min–max ----
+            _required.append(("extra_score", "Additional lender score"))
             with st.container(border=True):
                 st.markdown("**Any additional score a lender has given you?**")
-                st.caption("These are lender-specific and not published by any bureau — the dataset "
-                           "behind this model keeps them anonymous, so we cannot name them.")
-                additional_score_type = st.selectbox(
-                    "Type of score", SCORE_TYPES, index=None, placeholder="Select one…",
-                    key="tri_extra_type", label_visibility="collapsed")
-                if additional_score_type and additional_score_type != NOT_AVAILABLE:
-                    additional_score = st.number_input(
-                        "Score value", 0.0, 900.0, 0.0, 1.0,
-                        help="Enter on whatever scale the lender gave you (0–1 or 300–900).")
-                    if additional_score == 0.0:
-                        additional_score = None
+                st.caption("A lender-specific or fintech score that is not published by a credit "
+                           "bureau. If you have one, give its value and the score's possible range "
+                           "so we can place it on a common scale.")
+                _has_extra = st.selectbox(
+                    "Do you have an additional score?", ["No", "Yes"], index=None,
+                    placeholder="Select…", key="tri_extra_score", label_visibility="collapsed")
+                if _has_extra == "Yes":
+                    _c1, _c2, _c3 = st.columns(3)
+                    _es_val = _c1.number_input("Your score", value=None, step=1.0, key="es_val",
+                                               help="The score the lender gave you.")
+                    _es_min = _c2.number_input("Minimum possible", value=None, step=1.0, key="es_min",
+                                               help="Lowest value this score can take.")
+                    _es_max = _c3.number_input("Maximum possible", value=None, step=1.0, key="es_max",
+                                               help="Highest value this score can take.")
+                    if None not in (_es_val, _es_min, _es_max):
+                        if _es_max <= _es_min:
+                            st.error("The maximum must be greater than the minimum.")
+                        elif not (_es_min <= _es_val <= _es_max):
+                            st.error(f"Your score ({_es_val:g}) must be between the minimum "
+                                     f"({_es_min:g}) and the maximum ({_es_max:g}).")
+                        else:
+                            # normalise onto 0–1 — exactly the scale the model's external score uses
+                            additional_score = (_es_val - _es_min) / (_es_max - _es_min)
+                            st.caption(f"Placed on a 0–1 scale as **{additional_score:.2f}** "
+                                       "for the model.")
     _close(3)
 else:
     _locked_strip(3)
@@ -1093,24 +1114,35 @@ if _unlocked(4):
                     _hc = st.radio("cards", [YES, NO, NOTSURE], index=None, key="tri_hascards",
                                    horizontal=True, label_visibility="collapsed")
                 _no_cards = (_hc == NO)
+                _cards_yes = (_hc == YES)   # they've CONFIRMED cards exist
                 if _no_cards:
                     card_balance = card_limit = 0.0
                     num_credit_lines = 0
                     st.caption("No credit cards — card balance, limit and count are recorded as zero and "
                                "the follow-up card questions are skipped.")
+                elif _cards_yes:
+                    st.caption("You use credit cards, so the count and limit below can't be "
+                               "“I don't have any” — enter them, or pick “Not sure”. "
+                               "(Outstanding may still be zero if you clear your bill each month.)")
                 u1, u2 = st.columns(2)
                 with u1:
                     if not _no_cards:
+                        # outstanding CAN be zero even for a card user (pays in full) -> keep "none"
                         card_balance, _ = tri_number("Total outstanding on all credit cards (₹)", "cb",
                                                      min_value=0, max_value=10_000_000, value=50_000, step=5_000)
+                        # count implies cards exist -> drop "none" and require >=1 once confirmed
                         num_credit_lines, _ = tri_number("How many cards / active credit lines?", "ncl",
-                                                         min_value=0, max_value=50, value=3)
+                                                         allow_none=not _cards_yes,
+                                                         min_value=(1 if _cards_yes else 0),
+                                                         max_value=50, value=3)
                     enquiries_6m = plain_select("Loans or cards applied for in the last 6 months", "enq6",
                                                 [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x))
                 with u2:
                     if not _no_cards:
                         card_limit, _ = tri_number("Total credit limit across all cards (₹)", "cl",
-                                                   min_value=0, max_value=10_000_000, value=200_000, step=5_000)
+                                                   allow_none=not _cards_yes,
+                                                   min_value=(1 if _cards_yes else 0),
+                                                   max_value=10_000_000, value=200_000, step=5_000)
                     new_accounts_24m = plain_select(
                         "New loans or credit cards you OPENED in the last 24 months", "na24",
                         [0, 1, 2, 3], lambda x: "3 or more" if x == 3 else str(x),
@@ -1271,7 +1303,14 @@ if _unlocked(5):
             c_home, c_veh = st.columns(2)
             with c_home:
                 st.markdown("**🏠 Home loan**")
-                has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
+                # Consistency: if Section 4 housing = "paying a home loan", the person clearly HAS a
+                # home loan — don't ask the contradictory yes/no again, just set it and take details.
+                if housing == "paying_home_loan":
+                    has_home_loan = True
+                    st.caption("Set to **Yes** — your housing answer says you're paying a home loan, "
+                               "so we don't ask again.")
+                else:
+                    has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
                 if has_home_loan is True:
                     home_owed, _ = tri_number("Amount still owed on your home loan (₹)", "homeowed",
                                               min_value=0, max_value=200_000_000, value=0, step=50_000)
@@ -1456,7 +1495,7 @@ errors, warns = validate(
     has_home_loan=has_home_loan, has_vehicle_loan=has_vehicle_loan,
     monthly_income=monthly_income, coapplicant_income=coapplicant_income,
     monthly_emi=monthly_emi, loan_amount=loan_amount, term_months=term_months,
-    expected_roi=expected_roi, age=age,
+    expected_roi=expected_roi, age=age, coapplicant_age=coapplicant_age,
     card_balance=card_balance, card_limit=card_limit,
     num_credit_lines=num_credit_lines, first_credit_year=first_credit_year,
     asset_value=asset_value, down_payment=down_payment,
