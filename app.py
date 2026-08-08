@@ -724,11 +724,13 @@ def _unlocked(n):
 
 
 def _panel(n):
-    """The expander for step n, open only while it is the current step."""
+    """The expander for step n. Stays open once you reach it AND after you complete it,
+    so a finished section never collapses out from under you mid-presentation — you scroll
+    to the next section yourself. (Only steps not yet reached stay closed/locked.)"""
     done = st.session_state["_done"].get(n)
     _bounds[n] = len(_required)
     return st.expander(f"{'✓' if done else '▸'}  Step {n} of {_LAST_STEP}  ·  {_STEPS[n]}",
-                       expanded=(n == _current_step()))
+                       expanded=(done or n == _current_step()))
 
 
 def _close(n, extra=True):
@@ -748,26 +750,11 @@ def _close(n, extra=True):
         return True
 
     answered = all(_filled(k) for k, _ in mine)
-    was = bool(st.session_state["_done"].get(n))
-    now = bool(answered and extra)
-    st.session_state["_done"][n] = now
-    # A panel's expanded/collapsed state is decided when it is created, which is before
-    # this runs — so on the render where a step completes, it would stay open next to
-    # the one it just unlocked. Rerunning once settles both.
-    #
-    # But st.rerun() TRUNCATES the script: nothing below this line renders for that run,
-    # and Streamlit garbage-collects the session_state of any widget that failed to
-    # render. So rerunning on every change silently wiped every answer below the edit
-    # whenever a completed form was revisited — flipping the home-loan answer in step 5
-    # emptied steps 6 and 7.
-    #
-    # It therefore fires only when finishing this step reveals a step never seen before,
-    # which is the only case the expander-settling was for. Re-editing a form whose later
-    # steps are already on screen changes nothing about what is expanded, so it does not
-    # rerun and nothing is truncated. (`_seen[n+1]` is set by _unlocked() further down the
-    # script, so at this point it still reads False on a genuine first completion.)
-    if not was and now and n < _LAST_STEP and not st.session_state["_seen"].get(n + 1):
-        st.rerun()
+    st.session_state["_done"][n] = bool(answered and extra)
+    # No forced rerun. Completed sections now stay expanded (see _panel), so a finished
+    # section never collapses out from under the presenter — the next section simply renders
+    # open below it and the user scrolls to it manually. Removing the rerun also means fewer
+    # reruns (nothing below the edit is ever truncated / garbage-collected).
 
 
 def _locked_strip(n):
