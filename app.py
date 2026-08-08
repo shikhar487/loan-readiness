@@ -1315,19 +1315,25 @@ if _unlocked(5):
                 else:
                     has_home_loan, _ = tri_yesno("Do you currently have a home loan?", "hashome")
                 if has_home_loan is True:
+                    # You've confirmed a home loan, so these details must exist — no "I don't have any".
                     home_owed, _ = tri_number("Amount still owed on your home loan (₹)", "homeowed",
+                                              allow_none=False,
                                               min_value=0, max_value=200_000_000, value=0, step=50_000)
                     home_missed, _ = tri_yesno("Ever missed a payment on your home loan?", "homemiss")
                     home_year, _ = tri_number("Year you took your home loan", "homeyr",
+                                              allow_none=False,
                                               min_value=1970, max_value=2026, value=2018, zero=None)
             with c_veh:
                 st.markdown("**🚗 Vehicle / car loan**")
                 has_vehicle_loan, _ = tri_yesno("Do you currently have a vehicle / car loan?", "hasveh")
                 if has_vehicle_loan is True:
+                    # You've confirmed a vehicle loan, so these details must exist — no "I don't have any".
                     veh_owed, _ = tri_number("Amount still owed on your vehicle loan (₹)", "vehowed",
+                                             allow_none=False,
                                              min_value=0, max_value=50_000_000, value=0, step=25_000)
                     veh_missed, _ = tri_yesno("Ever missed a payment on your vehicle loan?", "vehmiss")
                     veh_year, _ = tri_number("Year you took your vehicle loan", "vehyr",
+                                             allow_none=False,
                                              min_value=1970, max_value=2026, value=2020, zero=None)
             # combine per-type answers into the model's secured-history inputs (model contract unchanged)
             if (has_home_loan is True) or (has_vehicle_loan is True):
@@ -1635,7 +1641,7 @@ if go:
         t1, t2 = st.columns(2)
         t1.markdown(f'<div class="tile"><div class="k">Loan-readiness score</div>'
                     f'<div class="v">{readiness}/100</div>'
-                    f'<div class="s">how strong your profile is</div></div>',
+                    f'<div class="s">how strong your profile is · indicative</div></div>',
                     unsafe_allow_html=True)
         t2.markdown(f'<div class="tile"><div class="k">Confidence</div>'
                     f'<div class="v">{res["precision"]}</div>'
@@ -1650,6 +1656,9 @@ if go:
         t4.markdown(f'<div class="tile"><div class="k">Loan requested</div>'
                     f'<div class="v" style="font-size:1.15rem">{_loan}</div>'
                     f'<div class="s">over {term_months} months</div></div>', unsafe_allow_html=True)
+        st.caption("ℹ️ The loan-readiness score is **indicative and lender-specific** — each lender sets "
+                   "its own risk ceiling and approval cut-off, so the same profile can read differently "
+                   "from one lender to another. Use this as a guide, not any single lender's decision.")
 
         # -- the arithmetic behind the score, directly beneath its own tiles -----
         st.markdown(
