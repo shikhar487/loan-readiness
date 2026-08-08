@@ -1064,7 +1064,10 @@ if _unlocked(3):
                             additional_score = (_es_val - _es_min) / (_es_max - _es_min)
                             st.caption(f"Placed on a 0–1 scale as **{additional_score:.2f}** "
                                        "for the model.")
-    _close(3)
+    # Don't count step 3 complete (which would auto-advance) while "Yes" is selected but the
+    # score/min/max are still blank or invalid — otherwise the revealed inputs get stranded.
+    _extra_ok = (st.session_state.get("tri_extra_score") != "Yes") or (additional_score is not None)
+    _close(3, extra=_extra_ok)
 else:
     _locked_strip(3)
 
@@ -1354,19 +1357,22 @@ if _unlocked(6):
         section("6", "Your other loan obligations",
                 "This is about your <b>instalment loans of every kind put together</b> — not just the "
                 "home/vehicle loans above.")
+        _il_state = None
         if new_to_credit:
             instalment_outstanding_pct = 0
             with st.container(border=True):
                 st.caption("🔒 Locked (new to credit): no other loan obligations.")
         else:
-            instalment_outstanding_pct, _ = tri_number(
+            instalment_outstanding_pct, _il_state = tri_number(
                 "Across ALL your instalment loans combined — car, personal, consumer-durable and "
                 "education loans (but NOT your home loan) — roughly what % of the total originally "
-                "borrowed is still outstanding?", "ilutil", min_value=0, max_value=100, value=50, step=5,
+                "borrowed is still outstanding?", "ilutil", min_value=0, max_value=100, value=None, step=5,
                 help="A rough estimate is fine. Someone about halfway through repaying these loans would say "
                      "~50%; someone who just took them, ~90%; nearly finished, ~10%. In our data this is a "
                      "strong signal — default rises from 19.6% to 25.0% as this percentage climbs.")
-    _close(6)
+    # Keep step 6 open until the "I have this" value is actually typed (value starts empty),
+    # instead of auto-advancing the moment "I have this" is chosen.
+    _close(6, extra=not (_il_state == HAVE and instalment_outstanding_pct is None))
 else:
     _locked_strip(6)
 
